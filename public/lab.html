@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>离线视频分析实验室 · 微表情 × 生命体征</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --bg-soft: #141821;
+      --card: #171a21;
+      --line: #262b36;
+      --line-soft: #2f3644;
+      --text: #e8eaed;
+      --muted: #9aa4b2;
+      --dim: #6b7688;
+      --accent: #3b82f6;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --err: #ef4444;
+      --purple: #a855f7;
+      --cyan: #06b6d4;
+      --mono: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    a { color: var(--muted); text-decoration: none; }
+    a:hover { color: var(--text); }
+
+    header.top {
+      position: sticky; top: 0; z-index: 20;
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      padding: 12px 22px;
+      background: rgba(23, 26, 33, 0.92);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--line);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .brand h1 { font-size: 16px; margin: 0; font-weight: 600; white-space: nowrap; }
+    .brand .tag { font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+    .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--cyan)); box-shadow: 0 0 12px rgba(59,130,246,.6); }
+    nav { display: flex; gap: 8px; }
+    nav a { font-size: 13px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; white-space: nowrap; }
+
+    main { padding: 18px 22px 48px; max-width: 1760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+    .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+    .muted { color: var(--muted); }
+    .dim { color: var(--dim); }
+    .mono { font-family: var(--mono); font-size: 12px; }
+
+    /* ---------- 上传区 ---------- */
+    .upload { display: grid; grid-template-columns: minmax(260px, 380px) 1fr; gap: 16px; padding: 16px; }
+    .drop {
+      position: relative; min-height: 210px; border: 1.5px dashed var(--line-soft); border-radius: 10px;
+      display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px;
+      cursor: pointer; transition: border-color .18s, background .18s; background: var(--bg-soft);
+    }
+    .drop:hover, .drop.over { border-color: var(--accent); background: rgba(59,130,246,.06); }
+    .drop strong { display: block; font-size: 15px; margin-bottom: 6px; }
+    .drop .muted { font-size: 12px; }
+    .drop .icon { font-size: 30px; margin-bottom: 8px; }
+
+    .upload-body { display: grid; grid-template-columns: minmax(220px, 340px) 1fr; gap: 16px; min-width: 0; }
+    .preview-wrap { min-width: 0; }
+    #preview { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 10px; display: block; object-fit: contain; }
+
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 12.5px; align-content: start; }
+    .kv dt { color: var(--muted); white-space: nowrap; }
+    .kv dd { margin: 0; word-break: break-all; font-family: var(--mono); font-size: 12px; }
+    .kv.small dd, .kv.small dt { font-size: 11.5px; }
+
+    .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 14px; margin: 14px 0; }
+    .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+    .field select, .field input[type="number"] {
+      background: var(--bg-soft); color: var(--text); border: 1px solid var(--line-soft);
+      border-radius: 7px; padding: 6px 8px; font-size: 13px; width: 100%;
+    }
+    .check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); }
+    .check input { accent-color: var(--accent); }
+
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    button {
+      background: var(--accent); border: 0; color: #fff; padding: 8px 14px; border-radius: 8px;
+      cursor: pointer; font-size: 13px; font-family: inherit; white-space: nowrap;
+    }
+    button:hover { filter: brightness(1.08); }
+    button:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+    button.secondary { background: #2a3040; }
+    button.ghost { background: transparent; border: 1px solid var(--line-soft); color: var(--muted); }
+    button.danger { background: #7f1d1d; }
+    button.tiny { padding: 4px 9px; font-size: 11.5px; }
+
+    .progress { height: 7px; border-radius: 999px; background: var(--bg-soft); overflow: hidden; margin: 14px 0 6px; }
+    .progress > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--cyan)); transition: width .15s linear; }
+    .progress > i.busy { background-size: 200% 100%; animation: flow 1.2s linear infinite; background-image: linear-gradient(90deg, var(--accent), var(--cyan), var(--accent)); }
+    @keyframes flow { to { background-position: -200% 0; } }
+
+    .log {
+      margin-top: 10px; font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+      white-space: pre-wrap; max-height: 92px; overflow: auto; background: var(--bg-soft);
+      border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+    }
+
+    /* ---------- 两列流水线 ---------- */
+    .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 18px; align-items: start; }
+    .flow { padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .flow-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .flow-head h2 { font-size: 15px; margin: 0 0 2px; }
+    .flow-head p { margin: 0; font-size: 12px; }
+    .flow-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+    .pill { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+    .pill.ok { color: var(--ok); border-color: rgba(34,197,94,.4); }
+    .pill.err { color: var(--err); border-color: rgba(239,68,68,.4); }
+
+    .step { border: 1px solid var(--line); border-radius: 10px; background: var(--bg-soft); overflow: hidden; }
+    .step > header { display: flex; align-items: center; gap: 9px; padding: 9px 12px; cursor: pointer; user-select: none; }
+    .step > header:hover { background: rgba(148,163,184,.04); }
+    .step .num { font-family: var(--mono); font-size: 11px; color: var(--dim); border: 1px solid var(--line-soft); border-radius: 5px; padding: 1px 5px; }
+    .step h3 { font-size: 13px; margin: 0; font-weight: 600; flex: 1; }
+    .step .body { padding: 0 12px 12px; }
+    .step > header .chev { color: var(--dim); font-size: 11px; transition: transform .15s; }
+    .step.collapsed > header .chev { transform: rotate(-90deg); }
+    .step.collapsed > .body { display: none; }
+
+    .badge { font-size: 10.5px; border-radius: 999px; padding: 2px 8px; border: 1px solid var(--line-soft); color: var(--dim); white-space: nowrap; }
+    .badge.running { color: var(--warn); border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.08); }
+    .badge.done { color: var(--ok); border-color: rgba(34,197,94,.4); background: rgba(34,197,94,.08); }
+    .badge.error { color: var(--err); border-color: rgba(239,68,68,.45); background: rgba(239,68,68,.08); }
+    .badge.skip { color: var(--dim); }
+
+    .hint { font-size: 11.5px; color: var(--dim); margin-top: 8px; }
+    .chart-title { font-size: 11.5px; color: var(--muted); margin: 12px 0 4px; }
+
+    canvas.frame { width: 100%; height: auto; max-height: 280px; border-radius: 8px; background: #000; display: block; }
+    canvas.frame-small { width: 100%; max-width: 320px; height: auto; border-radius: 8px; background: #000; display: block; }
+    canvas.chart { width: 100%; height: 200px; display: block; }
+    canvas.chart.tall { height: 260px; }
+    canvas.band { width: 100%; height: 34px; display: block; }
+    canvas.detect { width: 100%; height: auto; border-radius: 8px; background: #000; display: block; }
+
+    .two { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(160px, 320px); gap: 14px; align-items: start; }
+    .slider-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+    .slider-row input[type="range"] { flex: 1; accent-color: var(--accent); min-width: 60px; }
+    .slider-row .mono { white-space: nowrap; color: var(--muted); }
+
+    .stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .stat { display: inline-flex; align-items: baseline; gap: 5px; font-size: 11.5px; color: var(--muted); background: rgba(148,163,184,.07); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+    .stat b { font-weight: 600; color: var(--text); font-family: var(--mono); font-size: 12px; }
+    .stat.ok b { color: var(--ok); }
+    .stat.warn b { color: var(--warn); }
+    .stat.err b { color: var(--err); }
+
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+    .card-metric { border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; background: rgba(148,163,184,.05); }
+    .card-metric .label { font-size: 11px; color: var(--muted); }
+    .card-metric .value { font-size: 20px; font-weight: 650; font-family: var(--mono); margin-top: 2px; }
+    .card-metric .unit { font-size: 11px; color: var(--dim); margin-left: 2px; font-family: inherit; }
+
+    .crop-layout { display: grid; grid-template-columns: 1fr minmax(140px, 210px); gap: 12px; align-items: start; }
+    .thumb-grid { display: flex; flex-wrap: wrap; gap: 6px; max-height: 210px; overflow: auto; align-content: flex-start; padding: 2px; }
+    .thumb-grid img {
+      width: 54px; height: 54px; object-fit: cover; border-radius: 6px; border: 2px solid transparent;
+      cursor: pointer; background: #000; display: block;
+    }
+    .thumb-grid img:hover { border-color: var(--line-soft); }
+    .thumb-grid img.active { border-color: var(--accent); }
+    .crop-big { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #000; border: 1px solid var(--line); }
+    .crop-detail { min-width: 0; }
+
+    .table-wrap { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; }
+    table.tbl { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    table.tbl th, table.tbl td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; font-family: var(--mono); }
+    table.tbl th { position: sticky; top: 0; background: var(--card); color: var(--muted); font-weight: 500; z-index: 1; }
+    table.tbl th:first-child, table.tbl td:first-child { text-align: left; }
+    table.tbl tr:last-child td { border-bottom: 0; }
+    table.tbl td.err { color: var(--err); text-align: left; white-space: normal; }
+    table.tbl td.ok { color: var(--ok); }
+    table.tbl td.muted { color: var(--dim); }
+
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip { background: transparent; border: 1px solid var(--line-soft); color: var(--muted); padding: 4px 9px; border-radius: 999px; font-size: 11.5px; }
+    .chip.active { border-color: var(--accent); color: var(--text); background: rgba(59,130,246,.14); }
+
+    .empty { color: var(--dim); font-size: 12px; padding: 8px 0; }
+
+    @media (max-width: 920px) {
+      .upload { grid-template-columns: 1fr; }
+      .upload-body { grid-template-columns: 1fr; }
+      .two, .crop-layout { grid-template-columns: 1fr; }
+      .columns { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>离线视频分析实验室</h1>
+      <span class="tag">微表情 × 生命体征 · 分步可视化</span>
+    </div>
+    <nav>
+      <span class="pill">独立应用 · 只读复用 ../code</span>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ================= 上传 & 参数 ================= -->
+    <section class="panel upload">
+      <div class="drop" id="drop">
+        <input type="file" id="file" accept="video/*" hidden />
+        <div>
+          <div class="icon">🎞️</div>
+          <strong>拖入视频，或点击选择文件</strong>
+          <div class="muted">mp4 / webm / mov / mkv · 浏览器本地解码，不上传服务器</div>
+        </div>
+      </div>
+
+      <div class="upload-body">
+        <div class="preview-wrap">
+          <video id="preview" controls playsinline muted></video>
+          <div class="hint" id="previewHint">尚未选择视频</div>
+        </div>
+
+        <div>
+          <dl class="kv" id="fileMeta">
+            <dt>文件</dt><dd>—</dd>
+            <dt>大小</dt><dd>—</dd>
+            <dt>时长</dt><dd>—</dd>
+            <dt>分辨率</dt><dd>—</dd>
+          </dl>
+
+          <div class="opts">
+            <label class="field">微表情采样帧率
+              <select id="emoFps">
+                <option value="2">2 fps（快）</option>
+                <option value="5" selected>5 fps（推荐）</option>
+                <option value="10">10 fps（细）</option>
+              </select>
+            </label>
+            <label class="field">生命体征采样帧率
+              <select id="vitFps">
+                <option value="10">10 fps</option>
+                <option value="15" selected>15 fps（推荐）</option>
+                <option value="30">30 fps（高精度/慢）</option>
+              </select>
+            </label>
+            <label class="field">分析时长上限
+              <select id="maxSec">
+                <option value="0" selected>全部</option>
+                <option value="30">前 30 秒</option>
+                <option value="60">前 60 秒</option>
+                <option value="120">前 120 秒</option>
+                <option value="300">前 5 分钟</option>
+              </select>
+            </label>
+            <label class="field">情绪推理引擎
+              <select id="engineSel">
+                <option value="" selected>自动（WebGPU 优先）</option>
+                <option value="webgpu">强制 WebGPU</option>
+                <option value="wasm">强制 WASM(CPU)</option>
+              </select>
+            </label>
+            <label class="field">生理估计窗口（秒）
+              <input type="number" id="winSec" value="20" min="6" max="120" step="1" />
+            </label>
+            <label class="field">窗口步长（秒）
+              <input type="number" id="stepSec" value="5" min="1" max="60" step="1" />
+            </label>
+          </div>
+
+          <div class="actions">
+            <label class="check"><input type="checkbox" id="chkEmotion" checked /> 微表情</label>
+            <label class="check"><input type="checkbox" id="chkVitals" checked /> 生命体征</label>
+            <button id="btnRun" disabled>开始分析</button>
+            <button id="btnStop" class="secondary" disabled>停止</button>
+            <button id="btnReset" class="ghost tiny">清空结果</button>
+          </div>
+
+          <div class="progress"><i id="progressBar"></i></div>
+          <div id="progressText" class="muted">等待上传视频</div>
+          <div class="log" id="log">就绪。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 两列流水线 ================= -->
+    <div class="columns">
+      <!-- ---------- 微表情 ---------- -->
+      <section class="panel flow" id="panelEmotion">
+        <div class="flow-head">
+          <div>
+            <h2>① 微表情分析</h2>
+            <p class="muted">人脸检测 → 裁剪归一化 → 8 类情绪推理 → 微表情时间线</p>
+          </div>
+          <div class="flow-actions">
+            <button id="btnRunEmotion" class="secondary tiny" disabled>只跑本模块</button>
+          </div>
+        </div>
+
+        <article class="step" id="emoDecode">
+          <header data-toggle>
+            <span class="num">01</span><h3>视频解码与抽帧规划</h3>
+            <span class="badge" data-badge>等待视频</span><span class="chev">▾</span>
+          </header>
+          <div class="body">
+            <div class="two">
+              <dl class="kv small" id="emoDecodeMeta">
+                <dt>视频时长</dt><dd>—</dd>
+                <dt>画面尺寸</dt><dd>—</dd>
+                <dt>采样帧率</dt><dd>—</dd>
+                <dt>计划帧数</dt><dd>—</dd>
+                <dt>首帧</dt><dd>—</dd>
+              </dl>
+              <canvas id="emoFirstFrame" class="frame-small"></canvas>
+            </div>
+            <div class="hint">逐帧 seek 到目标时间点取帧，时间戳与视频真实时间一致，不受播放掉帧影响。</div>
+          </div>
+        </article>
+
+        <article class="step" id="emoDetect">
+          <header data-toggle>
+            <span class="num">02</span><h3>人脸检测（MediaPipe BlazeFace）</h3>
+            <span class="badge" data-badge>待运行</span><span class="chev">▾</span>
+          </header>
+          <div class="body">
+            <canvas id="emoDetectCanvas" class="detect"></canvas>
+            <div class="slider-row">
+              <input type="range" id="emoDetectRange" min="0" max="0" value="0" disabled />
+              <span id="emoDetectPos" class="mono">—</span>
+            </div>
+            <div class="stats" id="emoDetectStats"></div>
+            <div class="hint">拖动滑块可回看任意采样帧的人脸框；绿框为检出的人脸。</div>
+          </div>
+        </article>
+
+        <article class="step" id="emoCrop">
+          <header data-toggle>
+            <span class="num">03</span><h3>人脸裁剪与归一化</h3>
+            <span class="badge" data-badge>待运行</span><span class="chev">▾</span>
+          </header>
+          <div class="body">
+            <div class="crop-layout">
+              <div class="thumb-grid" id="emoCropGrid"><div class="empty">运行后显示逐帧人脸缩略图（点击查看大图与推理结果）。</div></div>
+              <div class="crop-detail">
+                <img id="emoCropBig" class="crop-big" alt="裁剪后的人脸" />
+                <dl class="kv small" id="emoCropInfo" style="margin-top:8px">
+                  <dt>时间</dt><dd>—</dd>
+                  <dt>人脸框</dt><dd>—</dd>
+                  <dt>输入尺寸</dt><dd>224 × 224</dd>
+                  <dt>RGB 均值</dt><dd>—</dd>
+                </dl>
+              </div>
+            </div>
+            <div class="hint">按人脸框外扩 1.3 倍裁出正方形，缩放到 224×224，并按 ImageNet 均值/方差归一化。</div>
+          </div>
+        </article>
+
+        <article class="step" id="emoInfer">
+          <header data-toggle>
+            <span class="num">04</span><h3>情绪推理（ONNX · enet_b0_8）</h3>
+            <span class="badge" data-badge>待运行</span><span class="chev">▾</span>
+          </header>
+          <div class="body">
+            <div class="chart-title">当前选中帧的 8 类情绪概率</div>
+            <canvas id="emoProbChart" class="chart" style="height:196px"></canvas>
+            <div class="stats" id="emoInferStats"></div>
+            <div class="chart-title">逐帧推理结果</div>
+            <div class="table-wrap">
+              <table class="tbl" id="emoSampleTable">
+                <thead><tr><th>时间</th><th>情绪</th><th>置信度</th><th>峰值类别</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </article>
+
+        <article class="step" id="emoTimeline">
+          <header data-toggle>
+            <span class="num">05</span><h3>微表情时间线与事件</h3>
+            <span class="badge" data-badge>待运行</span><span class="chev">▾</span>
+          </header>
+          <div class="body">
+            <div class="chart-title">主导情绪时间带</div>
+            <canvas id="emoBand" class="band"></canvas>
+            <div class="chart-title">8 类情绪概率曲线</div>
+            <canvas id="emoLineChart" class="chart tall"></canvas>
+            <div class="stats" id="emoSummary"></div>
+            <div class="chart-title">微表情事件（短时非平静表情）</div>
+            <div class="table-wrap">
+              <table class="tbl" id="emoEventsTable">
+                <thead><tr><th>起止</th><th>情绪</th><th>时长</th><th>平均置信度</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="actions" style="margin-top:10px">
+              <button id="btnEmoJson" class="secondary tiny" disabled>导出 JSON</button>
+              <button id="btnEmoCsv" class="secondary tiny" disabled>导出逐帧 CSV</button>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ---------- 生命体征 ---------- -->
+      <section class="panel flow" id="panelVitals">
+        <div class="flow-head">
+          <div>
+            <h2>② 生命体征检测（rPPG）</h2>
+            <p class="muted">人脸框跟随 → 三路 ROI 像素采样 → 分窗口信号估计 → 生理指标</p>
+          </div>
+          <div class="flow-actions">
+            <span id="physioStatus" class="pill">侧车检查中…</span>
+            <button id="btnPhysioCheck" class="ghost tiny">检查</button>
+            <button id="btnRunVitals" class="secondary tiny" disabled>只跑本模块</button>
+          </div>
+        </div>
+
+        <article class="step" id="vitTrack">
+          <header data-toggle>
+            <span class="num">01</span><h3>人脸跟踪与 ROI 定位</h3>
+            <span class="badge" data-badge>待运行</span><span class="chev">▾</span>
+          </header>
+          <div class="body">
+            <canvas id="vitTrackCanvas" class="detect"></canvas>
+            <div class="slider-row">
+              <input type="range" id="vitTrackRange" min="0" max="0" value="0" disabled />
+              <span id="vitTrackPos" class="mono">—</span>
+            </div>
+            <div class="stats" id="vitTrackStats"></div>
+            <div class="hint">绿框=人脸，黄框=额头 ROI，蓝/紫框=左右脸颊 ROI。ROI 内只统计 YCbCr 肤色像素。</div>
+          </div>
+        </article>
+
+        <article class="step" id="vitRoi">
+          <header data-toggle>
+            <span class="num">02</span><h3>ROI 像素采样曲线</h3>
+            <span class="badge" data-badge>待运行</span><span class="chev">▾</span>
+          </header>
+          <div class="body">
+            <div class="chips" id="vitChannelChips">
+              <button class="chip active" data-ch="G">绿通道（归一化）</button>
+              <button class="chip" data-ch="R">红通道</button>
+              <button class="chip" data-ch="B">蓝通道</button>
+              <button class="chip" data-ch="ALL">三通道原始值</button>
+            </div>
+            <div class="chart-title">三路 ROI 颜色均值随时间变化</div>
+            <canvas id="vitRoiChart" class="chart tall"></canvas>
+            <div class="stats" id="vitRoiStats"></div>
+            <div class="hint">rPPG 的脉搏信号非常微弱（通常 &lt; 1% 亮度变化），曲线中的细微周期波动即是脉搏。</div>
+          </div>
+        </article>
+
+        <article class="step" id="vitWindows">
+          <header data-toggle>
+            <span class="num">03</span><h3>分窗口信号估计（Python 侧车）</h3>
+            <span class="badge" data-badge>待运行</span><span class="chev">▾</span>
+          </header>
+          <div class="body">
+            <div id="vitWinProgress" class="muted">运行后按窗口调用 /physio/estimate，逐步追加结果。</div>
+            <div class="table-wrap">
+              <table class="tbl" id="vitWinTable">
+                <thead><tr><th>窗口</th><th>HR</th><th>RR</th><th>SpO₂</th><th>质量</th><th>状态</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </article>
+
+        <article class="step" id="vitSummary">
+          <header data-toggle>
+            <span class="num">04</span><h3>生理指标汇总</h3>
+            <span class="badge" data-badge>待运行</span><span class="chev">▾</span>
+          </header>
+          <div class="body">
+            <div class="cards" id="vitCards"></div>
+            <div class="chart-title">心率与信号质量随窗口变化</div>
+            <canvas id="vitSummaryChart" class="chart"></canvas>
+            <div class="hint" id="vitSummaryNote">
+              血氧与血压为普通 RGB 摄像头下的估计值，非医疗级；需逐设备、逐人标定。
+            </div>
+            <div class="actions" style="margin-top:10px">
+              <button id="btnVitJson" class="secondary tiny" disabled>导出 JSON</button>
+              <button id="btnVitCsv" class="secondary tiny" disabled>导出窗口 CSV</button>
+            </div>
+          </div>
+        </article>
+      </section>
+    </div>
+  </main>
+
+  <script type="module" src="/lab.js"></script>
+</body>
+</html>

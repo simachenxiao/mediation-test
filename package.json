@@ -1,0 +1,13 @@
+{
+  "name": "lifemirror-standalone-lab",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "独立离线视频分析实验室：微表情 + 生命体征，分步可视化（只读复用 ../code 的模型与运行时）",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
