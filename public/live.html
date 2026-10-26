@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>实时三引擎心率 · A / A+ / B 对比</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #111823;
+      --panel-2: #0e141d;
+      --line: #223044;
+      --ink: #e6edf7;
+      --muted: #8c9aad;
+      --a: #22d3ee;
+      --aplus: #34d399;
+      --b: #a78bfa;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); }
+    body {
+      font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+    a { color: inherit; }
+    .mono { font-family: ui-monospace, "JetBrains Mono", Consolas, monospace; }
+    .wrap { width: min(1320px, calc(100vw - 28px)); margin: 0 auto; padding: 22px 0 40px; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+    h1 { font-size: 24px; margin: 0; letter-spacing: .2px; }
+    .sub { margin: 6px 0 0; color: var(--muted); }
+    nav { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    nav a { color: var(--muted); text-decoration: none; border-bottom: 1px dashed #334155; }
+    nav a:hover { color: var(--ink); }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px;
+      border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px;
+      background: #0f1722; white-space: nowrap;
+    }
+    .pill::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--muted); }
+    .pill.loading::before { background: var(--warn); animation: pulse 1s infinite; }
+    .pill.ready::before { background: var(--ok); }
+    .pill.error::before { background: var(--bad); }
+    @keyframes pulse { 50% { opacity: .25; } }
+
+    .panel { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; }
+    .upload { display: grid; grid-template-columns: 250px minmax(320px, 1.25fr) minmax(280px, .8fr); gap: 14px; padding: 14px; margin-bottom: 14px; }
+    .drop {
+      min-height: 230px; border: 1px dashed #334155; border-radius: 10px; background: var(--panel-2);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+      cursor: pointer; text-align: center; padding: 18px; color: var(--muted);
+    }
+    .drop:hover, .drop.over { border-color: var(--a); color: var(--ink); }
+    .drop b { color: var(--ink); font-size: 15px; }
+    .drop .hint { font-size: 12px; }
+    .preview { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+    video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 10px; display: block; object-fit: contain; }
+    .play-row { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; }
+    .side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 0; font-size: 12px; }
+    .kv dt { color: var(--muted); }
+    .kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    button {
+      border: 1px solid #2a3b52; background: #162335; color: var(--ink); border-radius: 8px;
+      padding: 8px 12px; cursor: pointer; font: inherit;
+    }
+    button:hover:not(:disabled) { border-color: var(--a); }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    button.primary { background: var(--a); color: #051018; border-color: var(--a); font-weight: 700; }
+    button.ghost { background: transparent; color: var(--muted); }
+    #status { color: var(--muted); font-size: 12px; min-height: 34px; }
+    #log {
+      margin-top: auto; min-height: 60px; max-height: 110px; overflow: auto; white-space: pre-wrap;
+      border: 1px solid var(--line); border-radius: 8px; background: #080c12; padding: 8px;
+      font: 11px/1.45 ui-monospace, Consolas, monospace; color: #9fb0c5;
+    }
+
+    .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+    .metric { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); position: relative; overflow: hidden; }
+    .metric::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--a); }
+    .metric.aplus::before { background: var(--aplus); }
+    .metric.b::before { background: var(--b); }
+    .metric.diff::before { background: #64748b; }
+    .metric h2 { margin: 0; font-size: 13px; color: var(--muted); font-weight: 600; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .metric .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 7px; }
+    .big { font: 700 46px/1.05 ui-monospace, Consolas, monospace; margin: 12px 0 2px; letter-spacing: -1px; }
+    .big small { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 6px; letter-spacing: 0; }
+    .metric .state { color: var(--muted); font-size: 12px; min-height: 18px; }
+    .metric .rows { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin-top: 10px; font-size: 12px; }
+    .metric .rows span:nth-child(odd) { color: var(--muted); }
+    .metric .rows span:nth-child(even) { text-align: right; }
+    .metric.diff { grid-column: 1 / -1; }
+    .metric.diff .diff-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+    .metric.diff .diff-grid div { border: 1px solid var(--line); background: var(--panel-2); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+    .metric.diff .diff-grid span { display: block; color: var(--muted); font-size: 11px; }
+    .metric.diff .diff-grid b { display: block; font: 700 24px/1.15 ui-monospace, Consolas, monospace; margin-top: 3px; }
+    .metric.diff .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+    .charts { display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px; padding: 14px; margin-bottom: 14px; }
+    .chart-box { min-width: 0; }
+    .chart-box h3 { margin: 0 0 8px; font-size: 12px; color: var(--muted); font-weight: 600; }
+    canvas.chart { width: 100%; height: 220px; display: block; }
+    .note { padding: 14px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .note b { color: var(--ink); }
+    @media (max-width: 1050px) {
+      .upload { grid-template-columns: 210px 1fr; }
+      .upload .side { grid-column: 1 / -1; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+      .metric.diff { grid-column: 1 / -1; }
+    }
+    @media (max-width: 720px) {
+      .upload { grid-template-columns: 1fr; }
+      .metrics, .charts { grid-template-columns: 1fr; }
+      .metric.diff .diff-grid { grid-template-columns: 1fr; }
+      header { flex-direction: column; }
+      nav { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>实时三引擎心率 · A / A+ / B 对比</h1>
+        <p class="sub">上传视频 → 1× 播放 → A（POS+FFT）、A+（POS+Welch+SQI）与 B（FacePhys.rlap）同步出结果，不再等整段跑完。</p>
+      </div>
+      <nav>
+        <a href="/">← 离线实验室</a>
+        <span id="deepPill" class="pill loading">B 模型检查中…</span>
+      </nav>
+    </header>
+
+    <section class="panel upload">
+      <div class="drop" id="drop">
+        <input type="file" id="file" accept="video/*" hidden />
+        <b>选择视频</b>
+        <span class="hint">mp4 / webm / mov / mkv<br />浏览器本地播放，不上传</span>
+      </div>
+
+      <div class="preview">
+        <video id="video" controls playsinline muted></video>
+        <div class="play-row">
+          <span id="playTime">00:00 / 00:00</span>
+          <span id="playHint">尚未选择视频</span>
+        </div>
+      </div>
+
+      <div class="side">
+        <dl class="kv" id="meta">
+          <dt>文件</dt><dd>—</dd>
+          <dt>时长</dt><dd>—</dd>
+          <dt>分辨率</dt><dd>—</dd>
+        </dl>
+        <div class="actions">
+          <button id="btnStart" class="primary" disabled>开始实时分析</button>
+          <button id="btnStop" disabled>停止</button>
+          <button id="btnRestart" class="ghost" disabled>重新开始</button>
+        </div>
+        <div id="status">等待选择视频。</div>
+        <div id="log">就绪。</div>
+      </div>
+    </section>
+
+    <section class="metrics">
+      <article class="metric a">
+        <h2><span>A · POS + FFT</span><span class="tag">30s 窗口</span></h2>
+        <div class="big" id="aHr">—<small>bpm</small></div>
+        <div class="state" id="aState">预热中</div>
+        <div class="rows">
+          <span>置信度</span><span id="aConf">—</span>
+          <span>有效窗口</span><span id="aSpan">0s</span>
+          <span>后端</span><span>code/physio_service</span>
+        </div>
+      </article>
+
+      <article class="metric aplus">
+        <h2><span>A+ · POS + Welch + SQI</span><span class="tag">30s 窗口</span></h2>
+        <div class="big" id="aplusHr">—<small>bpm</small></div>
+        <div class="state" id="aplusState">预热中</div>
+        <div class="rows">
+          <span>质量</span><span id="aplusQuality">—</span>
+          <span>SQI</span><span id="aplusSqi">—</span>
+          <span>方法</span><span id="aplusMethod">—</span>
+          <span>原始 HR</span><span id="aplusRaw">—</span>
+          <span>有效窗口</span><span id="aplusSpan">0s</span>
+        </div>
+      </article>
+
+      <article class="metric b">
+        <h2><span>B · FacePhys.rlap</span><span class="tag">30s 窗口</span></h2>
+        <div class="big" id="bHr">—<small>bpm</small></div>
+        <div class="state" id="bState">模型加载中</div>
+        <div class="rows">
+          <span>SQI</span><span id="bSqi">—</span>
+          <span>已采集</span><span id="bDur">0s / 30s</span>
+          <span>原始 HR</span><span id="bRaw">—</span>
+        </div>
+      </article>
+
+      <article class="metric diff">
+        <h2><span>三路差异</span><span class="tag">相对 A</span></h2>
+        <div class="diff-grid">
+          <div><span>A+ − A</span><b id="diffAPlus">—</b></div>
+          <div><span>B − A</span><b id="diffB">—</b></div>
+          <div><span>B − A+</span><b id="diffBA">—</b></div>
+        </div>
+        <div class="note" id="diffNote">三路都出结果后显示差异。</div>
+      </article>
+    </section>
+
+    <section class="panel charts">
+      <div class="chart-box">
+        <h3>心率随时间（播放时间 / bpm）</h3>
+        <canvas id="hrChart" class="chart"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>质量（A 置信度 / A+ 质量 / B SQI）</h3>
+        <canvas id="qChart" class="chart"></canvas>
+      </div>
+    </section>
+
+    <section class="panel note">
+      <b>说明：</b>A 为原始 POS+FFT，低质量时数字仍可能出现；A+ 在 A 的采样上增加平滑去趋势、
+      0.8–3.5Hz + 0.6–3.5Hz 双频带、POS/CHROM/GREEN 多方法、共识簇、Welch 多段平均、SQI 和稳定器；B 为 FacePhys.rlap 深度模型，
+      需要先加载模型并累计约 30 秒信号。A+ 低质量时仍显示候选值，但会标注“低质量/保持”，请同时看质量和原始 HR。三者都不是医疗级测量。
+      视频播放期间会禁用进度条拖动，避免时间戳回退导致模型重置；需要回看时先停止分析。
+    </section>
+  </div>
+
+  <script type="module" src="/live.js"></script>
+</body>
+</html>

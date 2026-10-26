@@ -5,3 +5,7 @@
 *.mov
 *.log
 logs/
+
+# Python
+__pycache__/
+*.pyc

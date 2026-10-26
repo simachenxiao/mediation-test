@@ -3,7 +3,9 @@
 位置：`D:/产品/微表情识别/test`
 
 上传一段视频，分别运行**微表情分析**和**生命体征检测**，并逐步查看每一步的中间结果。
-两条链路完全独立：可以只跑其中一个，也可以先跑微表情再跑生命体征。
+另有一个**实时 A / A+ / B 心率对比页**：视频按 1× 播放，A（POS+FFT）、
+A+（POS/CHROM/GREEN + Welch + SQI）和 B（FacePhys.rlap）边播边出结果，
+不再等整段视频跑完。
 
 > 本目录是独立应用，**不会修改 `../code` 里的任何文件**；
 > 只以只读方式复用 `../code` 的模型、MediaPipe / onnxruntime-web 运行时和 Python 侧车。
@@ -36,12 +38,29 @@ pip install -r ../code/physio_service/requirements.txt
 
 微表情不依赖 Python；Python 没装时生命体征会提示侧车未启动，其余功能正常。
 
+### 实时 A / A+ / B 对比（B 引擎）
+
+打开 `http://localhost:3200/live`，需要额外准备：
+
+- `../EmotiEffLib-main/rppg-demo/rppg-demo/vendor/open_rppg`（FacePhys.rlap 权重与代码）
+- Python 侧已安装 `jax`、`keras`、`onnxruntime`、`opencv-python`、`heartpy`
+
+```bash
+pip install "jax" "keras>=3" onnxruntime opencv-python heartpy
+```
+
+B 模型首次加载约 **20–40 秒**，页面会显示加载状态；加载完成后才能开始实时分析。
+A/A+/B 都使用 30 秒滑动窗口，视频播放期间会禁用进度条拖动。
+
+A+ 是纯 NumPy/SciPy 侧车，不需要额外模型或新依赖；如果生命体征依赖已安装，A+ 就能启动。A+ 从约 12 秒开始，之后每约 1 秒更新一次；A 从约 8 秒开始，之后也每约 1 秒更新。
+
 ### 可配置环境变量
 
 ```bash
 PORT=3201 npm start                 # 换端口（默认 3200）
 HOST=127.0.0.1 npm start            # 只允许本机访问（默认 0.0.0.0）
 PHYSIO_PYTHON=python3.11 npm start  # 指定 Python 解释器
+APLUS_PYTHON=python3.11 npm start    # 指定 A+ 侧车解释器（可选）
 ```
 
 ---
@@ -51,18 +70,24 @@ PHYSIO_PYTHON=python3.11 npm start  # 指定 Python 解释器
 ```
 test/
 ├── server.mjs                  独立 HTTP 服务（Node 内置模块，无 npm 依赖）
+├── deep_service.py             B 引擎侧车：Open-rppg FacePhys.rlap
+├── aplus_service.py            A+ 侧车：POS/CHROM/GREEN + Welch + SQI
 ├── package.json                npm start -> node server.mjs
 ├── README.md                   本文件
 ├── docs/
-│   └── 离线视频分析实验室.md    详细说明 / 模块 API
+│   ├── 离线视频分析实验室.md    详细说明 / 模块 API
+│   └── 方法A的问题与A+改进.md   A 的问题、A+ 设计与参数
 └── public/
-    ├── lab.html                页面
-    ├── lab.js                  交互、步骤状态、图表、导出
+    ├── lab.html                离线分步分析页
+    ├── lab.js                  离线交互、步骤状态、图表、导出
+    ├── live.html               实时 A / A+ / B 对比页
+    ├── live.js                 实时播放、A/A+/B 采集与图表
     └── lib/
         ├── emotion.js          微表情模块（独立）
         ├── vitals.js           生命体征模块（独立）
         ├── face-detect.js      MediaPipe 人脸检测
         ├── roi.js              面部 ROI 像素采样
+        ├── physio-live.js      实时 A 采样（30s 窗口，A+ 复用）
         ├── video-frames.js     抽帧 / seek / 重采样
         └── charts.js           canvas 图表
 ```
@@ -76,6 +101,9 @@ test/
 | `/ort/*` | `../code/node_modules/onnxruntime-web/dist/*` |
 | `/models/*` | `../code/models/*` |
 | `/physio/estimate` | 代理到本机 Python 侧车 `../code/physio_service` |
+| `/live` | 实时 A / A+ / B 对比页 |
+| `/aplus/estimate` | 代理到 `aplus_service.py`（A+ 纯信号处理侧车） |
+| `/deep/*` | 代理到 `deep_service.py`（FacePhys.rlap） |
 
 ---
 
@@ -127,3 +155,4 @@ pip install -r ../code/physio_service/requirements.txt
 - 建议视频：10 秒以上、正脸清晰、光照均匀、人脸尽量少晃动（rPPG 对运动敏感）。
 - 两个模块都支持 JSON / CSV 导出。
 - 更详细的算法拆分与模块 API 见 [docs/离线视频分析实验室.md](docs/离线视频分析实验室.md)。
+- A 的六个问题与 A+ 设计见 [docs/方法A的问题与A+改进.md](docs/方法A的问题与A+改进.md)。
