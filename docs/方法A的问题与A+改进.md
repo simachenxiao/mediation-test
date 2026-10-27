@@ -6,6 +6,9 @@
 借鉴 B 的后处理思路做增强。A+ 不是深度学习模型，也不替代 B；它是在 A 的同一份 ROI 采样上，
 用更稳的信号处理得到第二组结果。
 
+> 当前版本 A+ 已改为 **POS-only**：不再计算 CHROM / GREEN。
+> 第 8、9 节中出现的三方法候选和复测数据是历史记录，保留用于说明为什么后来收窄到 POS。
+
 ---
 
 ## 1. A 当前实现路径
@@ -151,13 +154,22 @@ A+ 复用 A 的采样，不重复做 MediaPipe/ROI，避免两套采样时间不
 
 每个 ROI 独立参与候选。
 
-### 4.4 三种脉搏提取方法
+### 4.4 脉搏提取方法（当前：POS-only）
 
-对每个 ROI 分别计算：
+当前版本只使用 POS：
 
-- POS：`s1 = G-B`，`s2 = -2R+G+B`，`s = s1 + alpha*s2`
-- CHROM：`xs = 3R-2G`，`ys = 1.5R+G-1.5B`，`s = xs - (std(xs)/std(ys))*ys`
-- GREEN：归一化绿通道
+```text
+s1 = G - B
+s2 = -2R + G + B
+alpha = std(s1) / std(s2)
+s = s1 + alpha * s2
+```
+
+CHROM / GREEN 已从 A+ 侧车移除。保留双频带、双 ROI、Welch、SQI 和稳定器，
+但不再用三种方法做交叉验证。
+
+> 历史版本曾使用 POS / CHROM / GREEN 三方法；由于三者在手部运动/光照变化时高度相关，
+> “三方法共识”会制造虚假支持，后来收窄为 POS。
 
 ### 4.5 平滑先验去趋势
 
@@ -744,3 +756,75 @@ server.mjs         # /replay 路由；/deep/result POST 代理
 ```
 
 `../code` 未修改。
+
+
+---
+
+## 12. POS-only 改造（当前版本）
+
+### 12.1 改动
+
+- `METHODS` 只保留 `POS`
+- 删除 `_chrom` / `_green`
+- 候选数从 12 变成 4：
+  ```text
+  2 ROI × POS × 2 频带
+  ```
+- `supportMethods` 恒为 1，不再用于可靠判定
+- `agreement` 改为 `supportRois / 2`
+- `reliable` 改为：
+  ```python
+  support_rois >= 2
+  and not edge
+  and near_conf >= 0.01
+  and quality >= 0.30
+  and near_sqi >= 0.22
+  and near_margin >= 1.10
+  ```
+- 次谐波检查从 `supportMethods >= 2` 改为 `supportRois >= 2`
+- 簇排序中 ROI 权重从 0.5 提到 0.75
+
+### 12.2 结果
+
+合成信号：
+
+```text
+42 → 42
+48 → 48
+50 → 50
+55 → 55
+75 → 75
+90 → 90
+120 → 120
+45 → 47.9（轻微偏差）
+```
+
+`测试视频_cfr30.mp4` 40 秒固定重放：
+
+```text
+A/A+ 复跑：payload 33/33，A 33/33，A+ 29/29
+A+ 全程 reliable = false
+confidence 约 0.003–0.005
+quality 约 0.1–0.2
+页面显示低质量候选，最终约 93bpm
+```
+
+这说明：
+
+- 删掉 CHROM/GREEN 后，A+ 不再出现“3 方法+2 ROI 同时支持 91”的虚假共识；
+- 但这段视频本身质量太低，POS-only 达不到 `confidence >= 0.01`，所以 A+ 变得更保守，**始终不进入 reliable**；
+- 它不会再把 91 锁成稳定值，但会显示低质量候选 93/78/162 等，仍需结合质量看。
+
+### 12.3 结论
+
+POS-only 是可行的，但代价是：
+
+1. 失去 CHROM/GREEN 的交叉验证；
+2. 低质量视频上可靠结果会明显变少；
+3. 必须依赖 POS 自身的 confidence、SQI、margin 和运动门控。
+
+如果希望在低质量视频上仍能出 reliable，需要进一步做：
+- ROI 运动/遮挡检测；
+- 更细的 confidence/SQI 阈值标定；
+- 允许单 ROI 在置信度很高时通过；
+- 用接触式 ECG 真值校准，而不是只凭这段视频调阈值。

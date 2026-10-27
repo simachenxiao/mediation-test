@@ -5,9 +5,9 @@ A+ 不是 B 的替代品，而是在 A（POS + 单次 FFT）基础上补上 B �
 
   1. 平滑先验去趋势，替代 A 的线性去趋势；
   2. 频带下界从 0.7Hz 提到 0.8Hz，避开慢漂移最容易造假的区域；
-  3. POS / CHROM / GREEN 多方法、额头 / 脸颊多 ROI 交叉候选；
+  3. 只保留 POS 方法，额头 / 脸颊多 ROI + 双频带交叉候选；
   4. Welch 多段平均，替代单次 FFT 取最大峰；
-  5. 峰值置信度 + 自相关 SQI + 第一名/第二名差距 + 方法一致性；
+  5. 峰值置信度 + 自相关 SQI + 第一名/第二名差距 + ROI 一致性；
   6. 心率稳定器：限速 + EMA + 低质量保持；
   7. 返回 rawHr / hr / quality / reliable，页面可以同时看原始值和稳定值。
 
@@ -36,11 +36,12 @@ from scipy import signal as sps
 from scipy.sparse import diags, eye
 from scipy.sparse.linalg import spsolve
 
-MODEL_NAME = "A+ (POS/CHROM/GREEN + smooth detrend + Welch + SQI)"
+MODEL_NAME = "A+ (POS + smooth detrend + Welch + SQI)"
 BAND_HZ = (0.8, 3.5)
 LOW_BAND_HZ = (0.6, 3.5)
 DEFAULT_FS = 30.0
 EPS = 1e-12
+RELIABLE_MIN_CONF = 0.01
 
 
 # --------------------------------------------------------------------------- //
@@ -129,28 +130,8 @@ def _pos(rgb: np.ndarray) -> np.ndarray:
     return _normalize(s)
 
 
-def _chrom(rgb: np.ndarray) -> np.ndarray:
-    n = rgb.shape[0]
-    if n < 8:
-        return _normalize(rgb[:, 1])
-    rn = _temporal_normalize(rgb[:, 0])
-    gn = _temporal_normalize(rgb[:, 1])
-    bn = _temporal_normalize(rgb[:, 2])
-    xs = 3.0 * rn - 2.0 * gn
-    ys = 1.5 * rn + gn - 1.5 * bn
-    sy = float(np.std(ys))
-    s = xs if sy < EPS else xs - (float(np.std(xs)) / sy) * ys
-    return _normalize(s)
-
-
-def _green(rgb: np.ndarray) -> np.ndarray:
-    return _normalize(rgb[:, 1])
-
-
 METHODS = {
     "POS": _pos,
-    "CHROM": _chrom,
-    "GREEN": _green,
 }
 
 
@@ -330,10 +311,9 @@ def _select_cluster(
     """返回主簇和全部簇。
 
     排序依据：
-      1. 不同方法数量（POS/CHROM/GREEN）
-      2. 不同 ROI 数量（额头/脸颊）
-      3. 候选分数总和
-      4. 与上一轮稳定值的接近程度（防止在 76/111 两个簇之间来回跳）
+      1. 不同 ROI 数量（额头/脸颊）
+      2. 候选分数总和
+      3. 与上一轮稳定值的接近程度（防止在 76/111 两个簇之间来回跳）
     """
     clusters = _cluster_candidates(candidates)
     for cl in clusters:
@@ -341,16 +321,17 @@ def _select_cluster(
         if prior_hr is not None and abs(cl["hr"] - float(prior_hr)) <= 8.0:
             prior_bonus = 0.35
         cl["priorBonus"] = prior_bonus
+        # POS-only 时 supportMethods 恒为 1，因此把 ROI 支持的权重提高。
         cl["rank"] = (
             cl["supportMethods"]
-            + 0.5 * cl["supportRois"]
+            + 0.75 * cl["supportRois"]
             + cl["weight"]
             + prior_bonus
         )
 
     primary = max(clusters, key=lambda cl: cl["rank"])
 
-    # 次谐波检查：如果主簇约为另一簇的 2 倍，且另一簇有至少两个方法支持，
+    # 次谐波检查：如果主簇约为另一簇的 2 倍，且另一簇有两个 ROI 支持，
     # 优先选低的那一簇。用于修复 45bpm 被报成 90bpm。
     if primary["hr"] >= 70.0:
         half = primary["hr"] / 2.0
@@ -359,7 +340,7 @@ def _select_cluster(
             for cl in clusters
             if cl is not primary
             and abs(cl["hr"] - half) <= 6.0
-            and cl["supportMethods"] >= 2
+            and cl["supportRois"] >= 2
         ]
         if subs:
             sub = max(subs, key=lambda cl: cl["rank"])
@@ -507,7 +488,7 @@ class AplusSession:
         raw_hr = float(primary["hr"])
         support_methods = int(primary["supportMethods"])
         support_rois = int(primary["supportRois"])
-        agreement = min(1.0, support_methods / 3.0)
+        agreement = min(1.0, support_rois / 2.0)
         method_label = " + ".join(primary["methods"])
         if support_rois > 1:
             method_label += " / 多 ROI"
@@ -519,11 +500,13 @@ class AplusSession:
         base_quality = 0.45 * near_conf + 0.35 * near_sqi + 0.20 * margin_score
         quality = float(np.clip(base_quality * (0.70 + 0.30 * agreement), 0.0, 1.0))
 
-        # 峰值太贴近所用频带下边界时，可能只是慢漂移；只有单方法支持时不可信。
+        # 峰值太贴近所用频带下边界时，可能只是慢漂移。
+        # POS-only 没有多方法可交叉验证，要求两个 ROI 同时支持 + 频谱置信度下限。
         edge = bool(abs(raw_hr - float(primary["bandLow"]) * 60.0) <= 4.0)
         reliable = bool(
-            support_methods >= 2
-            and not (edge and support_methods < 3)
+            support_rois >= 2
+            and not edge
+            and near_conf >= RELIABLE_MIN_CONF
             and quality >= 0.30
             and near_sqi >= 0.22
             and near_margin >= 1.10

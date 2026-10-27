@@ -4,7 +4,7 @@
 
 上传一段视频，分别运行**微表情分析**和**生命体征检测**，并逐步查看每一步的中间结果。
 另有一个**实时 A / A+ / B 心率对比页**：视频按 1× 播放，A（POS+FFT）、
-A+（POS/CHROM/GREEN + Welch + SQI）和 B（FacePhys.rlap）边播边出结果，
+A+（POS + Welch + SQI）和 B（FacePhys.rlap）边播边出结果，
 不再等整段视频跑完。
 
 还有一个**确定性重放页**：固定 15fps 抽帧、固定人脸框和 30 秒窗口，
@@ -89,7 +89,7 @@ APLUS_PYTHON=python3.11 npm start    # 指定 A+ 侧车解释器（可选）
 test/
 ├── server.mjs                  独立 HTTP 服务（Node 内置模块，无 npm 依赖）
 ├── deep_service.py             B 引擎侧车：Open-rppg FacePhys.rlap
-├── aplus_service.py            A+ 侧车：POS/CHROM/GREEN + Welch + SQI
+├── aplus_service.py            A+ 侧车：POS + Welch + SQI
 ├── package.json                npm start -> node server.mjs
 ├── README.md                   本文件
 ├── docs/

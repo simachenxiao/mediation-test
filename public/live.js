@@ -1,7 +1,7 @@
 // 实时 A / A+ / B 心率对比页。
 //
 // A ：MediaPipe 人脸框 → ROI 平均 RGB → 30s 滑动窗口 → /physio/estimate（POS+FFT）
-// A+：复用 A 的采样 payload → /aplus/estimate（POS/CHROM/GREEN + Welch + SQI）
+// A+：复用 A 的采样 payload → /aplus/estimate（POS + Welch + SQI）
 // B ：浏览器把播放帧发给 /deep/frame → deep_service.py（FacePhys.rlap）→ /deep/result
 //
 // 视频按 1× 播放，三路结果边播边出；不做整段离线分析。
@@ -272,7 +272,7 @@ async function warmAplus() {
   try {
     const res = await fetch('/aplus/health', { cache: 'no-store' });
     const d = await res.json();
-    if (d.ready) log('A+ 引擎就绪（POS/CHROM/GREEN + Welch + SQI）。');
+    if (d.ready) log('A+ 引擎就绪（POS + Welch + SQI）。');
     else if (d.error) log(`A+ 引擎不可用：${d.error}`);
   } catch (err) {
     state.aplusError = err.message;
