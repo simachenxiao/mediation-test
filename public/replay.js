@@ -618,7 +618,9 @@ function renderAll(run, { repeat = false } = {}) {
   if (apLast) {
     $('aplusState').textContent = apLast.reliable
       ? (apLast.status === 'live' ? '可信 / 实时' : `可信 / ${apLast.status}`)
-      : '低质量候选';
+      : apLast.status === 'holding'
+        ? `低质量·保持${apLast.heldSec != null ? `（${Math.round(apLast.heldSec)}s）` : ''}`
+        : '低质量候选';
     $('aplusQuality').textContent = apLast.quality != null ? apLast.quality.toFixed(3) : '—';
     $('aplusSqi').textContent = apLast.sqi != null ? apLast.sqi.toFixed(3) : '—';
     $('aplusRoi').textContent = apLast.activeRoi ? `${apLast.activeRoi}${apLast.fallback ? '（回退）' : ''}` : '—';

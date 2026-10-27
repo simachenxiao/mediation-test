@@ -8,8 +8,8 @@ A+ 不是 B 的替代品，而是在 A（POS + 单次 FFT）基础上补上 B �
   3. 只保留 POS 方法；额头优先，额头没有可用候选时才回退到脸颊；
   4. Welch 多段平均，替代单次 FFT 取最大峰；
   5. 峰值置信度 + 自相关 SQI + 第一名/第二名差距；
-  6. 心率稳定器：限速 + EMA + 低质量保持；
-  7. 返回 rawHr / hr / quality / reliable，页面可以同时看原始值和稳定值。
+  6. 低质量窗口也维护“稳定候选”，但 reliable 仍然只由质量门控决定；
+  7. 返回 rawHr / hr / quality / reliable，页面同时显示原始候选和稳定候选。
 
 输入与 /physio/estimate 完全一致：
 {
@@ -327,21 +327,34 @@ def _select_cluster(
 
     primary = max(clusters, key=lambda cl: cl["rank"])
 
-    # 次谐波检查：如果主簇约为另一簇的 2 倍，且低簇由两个频带支持，
-    # 优先选低的那一簇。用于修复 45bpm 被报成 90bpm。
+    # 次谐波检查：如果主簇约为另一簇的 2 倍，优先选低的那一簇。
+    # POS-only 后每个频带是一个独立候选，不能再要求“两个成员支持”。
     if primary["hr"] >= 70.0:
         half = primary["hr"] / 2.0
         subs = [
             cl
             for cl in clusters
-            if cl is not primary
-            and abs(cl["hr"] - half) <= 6.0
-            and len(cl["members"]) >= 2
+            if cl is not primary and abs(cl["hr"] - half) <= 6.0
         ]
         if subs:
             sub = max(subs, key=lambda cl: cl["rank"])
             if sub["weight"] >= 0.45 * primary["weight"]:
                 primary = sub
+
+    # 低质量窗口里，120bpm 以上的峰很可能是二次谐波/运动伪影。
+    # 如果同时存在 50–100bpm 的近似候选，且证据不弱，优先保留低频候选。
+    # POS-only 后每个频带是一个独立候选，不能用“多个方法支持”来判断。
+    primary_conf = max(float(c["confidence"]) for c in primary["members"])
+    if primary["hr"] >= 120.0 and primary_conf < 0.02:
+        lower = [
+            cl
+            for cl in clusters
+            if cl is not primary
+            and 50.0 <= cl["hr"] <= 100.0
+            and cl["weight"] >= 0.50 * primary["weight"]
+        ]
+        if lower:
+            primary = max(lower, key=lambda cl: cl["rank"])
 
     return primary, clusters
 
@@ -354,11 +367,13 @@ class Stabilizer:
         self.smoothed: float | None = None
         self.last_at: float | None = None
         self.last_good_at: float | None = None
+        self.far_since: float | None = None
 
     def reset(self) -> None:
         self.smoothed = None
         self.last_at = None
         self.last_good_at = None
+        self.far_since = None
 
     def update(
         self,
@@ -380,11 +395,47 @@ class Stabilizer:
             held = round(now - self.last_good_at, 1) if self.last_good_at else None
             return self.smoothed, "holding" if self.smoothed is not None else "warming", held
 
-        # 没有通过共识/边缘检查的候选，不参与初始化，也不更新。
+        # 不可信窗口仍然维护一个“候选值”，但绝不把它标成 reliable。
+        # 目的：低质量视频里页面不要每秒在 60/130 之间跳；
+        # 代价：它只是稳定候选，不应当当成可信心率。
         if not reliable:
-            held = round(now - self.last_good_at, 1) if self.last_good_at else None
-            return self.smoothed, "holding" if self.smoothed is not None else "warming", held
+            if q < 0.05:
+                held = round(now - self.last_good_at, 1) if self.last_good_at else None
+                return self.smoothed, "holding" if self.smoothed is not None else "warming", held
+            if self.smoothed is None:
+                self.smoothed = float(raw)
+                self.last_at = now
+                self.last_good_at = now
+                self.far_since = None
+                return round(self.smoothed, 1), "live", None
 
+            dt = max(0.5, min(3.0, now - self.last_at)) if self.last_at else 1.0
+            delta = float(raw) - self.smoothed
+            near = max(12.0, 0.15 * abs(self.smoothed))
+            if abs(delta) <= near:
+                # 候选值只允许慢慢移动，避免跟随单窗口的假峰。
+                limited = max(-4.0 * dt, min(4.0 * dt, delta))
+                self.smoothed = self.smoothed + limited * 0.25
+                self.last_at = now
+                self.last_good_at = now
+                self.far_since = None
+                return round(self.smoothed, 1), "live", None
+
+            # 远离当前候选：先保持。向下变化持续 6s 才接受；
+            # 向上变化可能是二次谐波/运动伪影，要求更久或等 reliable。
+            if self.far_since is None:
+                self.far_since = now
+            far_for = now - self.far_since
+            if delta < 0 and far_for >= 6.0:
+                self.smoothed = float(raw)
+                self.last_at = now
+                self.last_good_at = now
+                self.far_since = None
+                return round(self.smoothed, 1), "live", None
+            held = round(now - self.last_good_at, 1) if self.last_good_at else None
+            return round(self.smoothed, 1), "holding", held
+
+        self.far_since = None
         if self.smoothed is None:
             if q < 0.28:
                 return None, "warming", None
