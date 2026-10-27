@@ -672,3 +672,75 @@ A+  59bpm
 
 CFR30 视频并没有让 A+ 自动变成可靠结果。  
 A+ 仍然处于“低质量候选可看，但不能当结论”的状态；A 在这段视频上反而更稳定，B 也不一定正确。
+
+---
+
+## 11. 确定性重放模式（`/replay`）
+
+实时页的结果会受浏览器播放采样影响，所以新增了独立的确定性重放页：
+
+```text
+http://localhost:3200/replay
+```
+
+### 11.1 固定了什么
+
+| 项目 | 实时页 `/live` | 确定性重放 `/replay` |
+|---|---|---|
+| 采样 | `requestVideoFrameCallback`，按播放时机 | 固定 15fps 逐点 `seek` |
+| 时间戳 | 浏览器当前时间，略有抖动 | 固定 `i / 15` |
+| 人脸框 | 异步检测，框复用 1.5s | 固定帧序列检测，缓存复用 |
+| 窗口 | 请求时刻决定 | 固定 30s 窗口，固定 1s 检查点 |
+| A+ / B 稳定器 | `time.monotonic()` / `time.time()` | `replayTime` = 视频时间 |
+| 重复验证 | 无 | A/A+ 自动复跑；B 可再跑一次对比 |
+
+### 11.2 复跑结果
+
+测试文件：`测试视频_cfr30.mp4`，1920×1080，30fps CFR，43.63s。
+
+#### 20 秒模式（A/A+）
+
+```text
+payload Hash 一致：13/13
+A 复跑一致：13/13
+A+ 复跑一致：9/9
+```
+
+#### 35 秒模式（A/A+/B）
+
+```text
+payload Hash 一致：28/28
+A 复跑一致：28/28
+A+ 复跑一致：24/24
+B 首次：77.4bpm，SQI 0.332
+```
+
+#### 33 秒模式，点“再跑一次并对比”（A/A+/B）
+
+```text
+payload Hash 一致：26/26
+A 复跑一致：26/26
+A+ 复跑一致：22/22
+B 两次固定重放逐点一致：4/4
+```
+
+### 11.3 结论
+
+- A+ 的信号处理和稳定器在固定 payload + 固定视频时间下是**可重复**的。
+- B 在同一批固定帧、固定时间戳、reset 后重放，也可以逐点一致。
+- 但“可重复”不等于“准确”：
+  - 这一轮 A 约 58bpm、A+ 约 91bpm、B 约 77bpm；
+  - 三者仍然不一致，说明它们在看不同的信号/峰；
+  - 没有 ECG 真值，不能仅凭重放一致判断谁正确。
+
+### 11.4 实现位置
+
+```text
+public/replay.html
+public/replay.js
+aplus_service.py   # Stabilizer.update(..., now=replayTime)
+deep_service.py    # Stabilizer.update(..., now=replayTime)；POST /result 支持 waitUntil
+server.mjs         # /replay 路由；/deep/result POST 代理
+```
+
+`../code` 未修改。

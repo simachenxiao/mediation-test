@@ -383,10 +383,21 @@ class Stabilizer:
         self.last_at = None
         self.last_good_at = None
 
-    def update(self, raw: float | None, quality: float | None, reliable: bool = True) -> tuple[float | None, str, float | None]:
-        """返回 (显示值, 状态, 已保持秒数)。"""
+    def update(
+        self,
+        raw: float | None,
+        quality: float | None,
+        reliable: bool = True,
+        now: float | None = None,
+    ) -> tuple[float | None, str, float | None]:
+        """返回 (显示值, 状态, 已保持秒数)。
+
+        now 用于确定性重放：传入视频时间而不是 wall clock，
+        这样同一份 payload 序列每次得到相同的 dt / EMA / heldSec。
+        """
         q = 0.0 if quality is None else max(0.0, min(1.0, float(quality)))
-        now = time.monotonic()
+        clock = time.monotonic() if now is None else float(now)
+        now = clock
 
         if raw is None or not (30.0 <= raw <= 220.0):
             held = round(now - self.last_good_at, 1) if self.last_good_at else None
@@ -519,7 +530,15 @@ class AplusSession:
         )
 
         with self.lock:
-            stable, status, held_sec = self.stabilizer.update(raw_hr, quality, reliable)
+            replay_time = None
+            if payload.get("replay"):
+                try:
+                    replay_time = float(payload.get("replayTime"))
+                except (TypeError, ValueError):
+                    replay_time = None
+            stable, status, held_sec = self.stabilizer.update(
+                raw_hr, quality, reliable, now=replay_time
+            )
             result = {
                 "ready": True,
                 "model": MODEL_NAME,
@@ -553,6 +572,7 @@ class AplusSession:
                 "nSamples": int(n),
                 "span": round(span, 2),
                 "latencyMs": round((time.monotonic() - started) * 1000.0, 1),
+                "replay": bool(payload.get("replay")),
             }
             self.last_result = result
             self.last_at = time.time()

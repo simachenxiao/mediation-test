@@ -697,7 +697,11 @@ async function handle(req, res) {
 
   if (pathname === '/deep/result') {
     try {
-      const upstream = await deepFetch('/result');
+      const body = req.method === 'POST' ? await readBody(req) : null;
+      const upstream = await deepFetch('/result', {
+        method: body ? 'POST' : 'GET',
+        body,
+      });
       setHeaders(res);
       res.writeHead(upstream.status, {
         'Content-Type': 'application/json; charset=utf-8',
@@ -762,6 +766,12 @@ async function handle(req, res) {
       : sendJson(res, 404, { error: 'live.html not found' });
   }
 
+  if (pathname === '/replay' || pathname === '/replay.html') {
+    return sendFile(res, path.join(PUBLIC, 'replay.html'), 'no-cache')
+      ? undefined
+      : sendJson(res, 404, { error: 'replay.html not found' });
+  }
+
   // ---- 只读依赖 ----
   for (const m of MOUNTS) {
     if (pathname.startsWith(m.prefix)) {
@@ -804,6 +814,7 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`🧪 离线分析实验室: http://localhost:${PORT}/`);
   console.log(`实时 A / A+ / B 对比: http://localhost:${PORT}/live`);
+  console.log(`确定性重放: http://localhost:${PORT}/replay`);
   console.log(`   页面目录: ${PUBLIC}`);
   console.log(`   只读依赖: ${CODE}`);
   ensurePhysio().catch((err) => console.error('[physio] 预启动失败:', err.message));

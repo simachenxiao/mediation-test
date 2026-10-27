@@ -48,12 +48,17 @@ class Stabilizer:
         self.smoothed_hr = None
         self.last_update_at = None
 
-    def update(self, raw_hr: float | None, sqi: float | None) -> tuple[float | None, str]:
+    def update(
+        self,
+        raw_hr: float | None,
+        sqi: float | None,
+        now: float | None = None,
+    ) -> tuple[float | None, str]:
         if raw_hr is None or not 35 <= raw_hr <= 190:
             return self.smoothed_hr, "holding" if self.smoothed_hr is not None else "warming"
 
         quality = 0.0 if sqi is None else max(0.0, min(1.0, sqi))
-        now = time.time()
+        now = time.time() if now is None else float(now)
         if self.smoothed_hr is None:
             if quality < 0.2:
                 return None, "warming"
@@ -167,7 +172,30 @@ class DeepSession:
         model.update_frame(frame_rgb, ts)
         return {"ok": True, "timestamp": ts}
 
-    def result(self) -> dict[str, Any]:
+    def result(
+        self,
+        now: float | None = None,
+        wait_until: float | None = None,
+        timeout: float = 20.0,
+    ) -> dict[str, Any]:
+        # 重放时先等模型把队列里的固定帧处理到目标时间点，
+        # 否则 /result 可能读到上一秒的状态，导致不可重复。
+        if wait_until is not None:
+            deadline = time.time() + max(1.0, float(timeout))
+            while time.time() < deadline:
+                with self.lock:
+                    model = self.model
+                    ready = self.ready
+                if model is None or not ready:
+                    break
+                try:
+                    current = float(model.now)
+                except Exception:  # noqa: BLE001
+                    break
+                if current >= float(wait_until) - 0.35:
+                    break
+                time.sleep(0.02)
+
         with self.lock:
             model = self.model
             ready = self.ready
@@ -202,7 +230,7 @@ class DeepSession:
         except Exception as exc:  # noqa: BLE001
             err = f"{type(exc).__name__}: {exc}"
 
-        hr, status = self.stabilizer.update(raw_hr, sqi)
+        hr, status = self.stabilizer.update(raw_hr, sqi, now=now)
         return {
             "ready": True,
             "loading": False,
@@ -284,6 +312,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SESSION.reset())
             elif self.path == "/stop":
                 self._json(200, SESSION.stop())
+            elif self.path == "/result":
+                payload = self._body()
+                self._json(
+                    200,
+                    SESSION.result(
+                        now=payload.get("replayTime"),
+                        wait_until=payload.get("waitUntil"),
+                        timeout=float(payload.get("timeout") or 20.0),
+                    ),
+                )
             elif self.path == "/frame":
                 payload = self._body()
                 self._json(

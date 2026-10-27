@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>确定性重放 · A / A+ / B</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #111823;
+      --panel-2: #0e141d;
+      --line: #223044;
+      --ink: #e6edf7;
+      --muted: #8c9aad;
+      --a: #22d3ee;
+      --aplus: #34d399;
+      --b: #a78bfa;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); }
+    body {
+      font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+    a { color: inherit; }
+    .mono { font-family: ui-monospace, "JetBrains Mono", Consolas, monospace; }
+    .wrap { width: min(1320px, calc(100vw - 28px)); margin: 0 auto; padding: 22px 0 40px; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+    h1 { font-size: 24px; margin: 0; letter-spacing: .2px; }
+    .sub { margin: 6px 0 0; color: var(--muted); }
+    nav { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    nav a { color: var(--muted); text-decoration: none; border-bottom: 1px dashed #334155; }
+    nav a:hover { color: var(--ink); }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px;
+      border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px;
+      background: #0f1722; white-space: nowrap;
+    }
+    .pill::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--muted); }
+    .pill.loading::before { background: var(--warn); animation: pulse 1s infinite; }
+    .pill.ready::before { background: var(--ok); }
+    .pill.error::before { background: var(--bad); }
+    @keyframes pulse { 50% { opacity: .25; } }
+
+    .panel { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; }
+    .upload { display: grid; grid-template-columns: 250px minmax(320px, 1.25fr) minmax(280px, .8fr); gap: 14px; padding: 14px; margin-bottom: 14px; }
+    .drop {
+      min-height: 230px; border: 1px dashed #334155; border-radius: 10px; background: var(--panel-2);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+      cursor: pointer; text-align: center; padding: 18px; color: var(--muted);
+    }
+    .drop:hover, .drop.over { border-color: var(--a); color: var(--ink); }
+    .drop b { color: var(--ink); font-size: 15px; }
+    .drop .hint { font-size: 12px; }
+    .preview { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+    video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 10px; display: block; object-fit: contain; }
+    .play-row { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; }
+    .side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 0; font-size: 12px; }
+    .kv dt { color: var(--muted); }
+    .kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    button {
+      border: 1px solid #2a3b52; background: #162335; color: var(--ink); border-radius: 8px;
+      padding: 8px 12px; cursor: pointer; font: inherit;
+    }
+    button:hover:not(:disabled) { border-color: var(--a); }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    button.primary { background: var(--a); color: #051018; border-color: var(--a); font-weight: 700; }
+    button.ghost { background: transparent; color: var(--muted); }
+    .field { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+    .field input[type="number"] {
+      width: 74px; background: #0b1119; color: var(--ink); border: 1px solid var(--line);
+      border-radius: 7px; padding: 5px 7px; font: 12px ui-monospace, Consolas, monospace;
+    }
+    .field input[type="checkbox"] { accent-color: var(--a); }
+    #status { color: var(--muted); font-size: 12px; min-height: 34px; }
+    .progress { height: 6px; background: #0b1119; border-radius: 999px; overflow: hidden; border: 1px solid var(--line); }
+    #progressBar { height: 100%; width: 0%; background: var(--a); transition: width .15s linear; }
+    #progressBar.busy { background: linear-gradient(90deg, var(--a), var(--aplus), var(--a)); background-size: 200% 100%; animation: slide 1.2s linear infinite; }
+    @keyframes slide { to { background-position: -200% 0; } }
+    #progressText { color: var(--muted); font: 11px ui-monospace, Consolas, monospace; min-height: 16px; }
+    #log {
+      margin-top: auto; min-height: 60px; max-height: 110px; overflow: auto; white-space: pre-wrap;
+      border: 1px solid var(--line); border-radius: 8px; background: #080c12; padding: 8px;
+      font: 11px/1.45 ui-monospace, Consolas, monospace; color: #9fb0c5;
+    }
+
+    .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+    .metric { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); position: relative; overflow: hidden; }
+    .metric::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--a); }
+    .metric.aplus::before { background: var(--aplus); }
+    .metric.b::before { background: var(--b); }
+    .metric.det::before { background: #64748b; }
+    .metric.det { grid-column: 1 / -1; }
+    .metric h2 { margin: 0; font-size: 13px; color: var(--muted); font-weight: 600; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .metric .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 7px; }
+    .big { font: 700 46px/1.05 ui-monospace, Consolas, monospace; margin: 12px 0 2px; letter-spacing: -1px; }
+    .big small { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 6px; letter-spacing: 0; }
+    .metric .state { color: var(--muted); font-size: 12px; min-height: 18px; }
+    .metric .rows { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin-top: 10px; font-size: 12px; }
+    .metric .rows span:nth-child(odd) { color: var(--muted); }
+    .metric .rows span:nth-child(even) { text-align: right; }
+    .det-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+    .det-grid div { border: 1px solid var(--line); background: var(--panel-2); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+    .det-grid span { display: block; color: var(--muted); font-size: 11px; }
+    .det-grid b { display: block; font: 700 20px/1.2 ui-monospace, Consolas, monospace; margin-top: 3px; }
+    .det-grid .ok { color: var(--ok); }
+    .det-grid .bad { color: var(--bad); }
+    .det-grid .muted { color: var(--muted); }
+    .det .note { color: var(--muted); font-size: 12px; margin-top: 8px; line-height: 1.6; }
+
+    .charts { display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px; padding: 14px; margin-bottom: 14px; }
+    .chart-box { min-width: 0; }
+    .chart-box h3 { margin: 0 0 8px; font-size: 12px; color: var(--muted); font-weight: 600; }
+    canvas.chart { width: 100%; height: 220px; display: block; }
+    .table-wrap { padding: 14px; margin-bottom: 14px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: right; padding: 7px 9px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+    th:first-child, td:first-child { text-align: left; }
+    td.mono { font-family: ui-monospace, Consolas, monospace; }
+    .hint-line { color: var(--muted); font-size: 11px; margin: 0 0 8px; }
+    .note { padding: 14px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .note b { color: var(--ink); }
+    @media (max-width: 1050px) {
+      .upload { grid-template-columns: 210px 1fr; }
+      .upload .side { grid-column: 1 / -1; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+      .metric.det { grid-column: 1 / -1; }
+    }
+    @media (max-width: 720px) {
+      .upload { grid-template-columns: 1fr; }
+      .metrics, .charts { grid-template-columns: 1fr; }
+      .det-grid { grid-template-columns: 1fr 1fr; }
+      header { flex-direction: column; }
+      nav { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>确定性重放 · A / A+ / B</h1>
+        <p class="sub">不按播放时钟采样：固定帧号、固定时间戳、固定人脸框、固定窗口，验证三路算法本身是否可重复。</p>
+      </div>
+      <nav>
+        <a href="/">← 离线实验室</a>
+        <a href="/live">实时对比</a>
+        <span id="deepPill" class="pill loading">B 模型检查中…</span>
+      </nav>
+    </header>
+
+    <section class="panel upload">
+      <div class="drop" id="drop">
+        <input type="file" id="file" accept="video/*" hidden />
+        <b>选择视频</b>
+        <span class="hint">mp4 / webm / mov / mkv<br />只在本地解码，不上传</span>
+      </div>
+
+      <div class="preview">
+        <video id="video" controls playsinline muted></video>
+        <div class="play-row">
+          <span id="playTime">00:00 / 00:00</span>
+          <span id="playHint">尚未选择视频</span>
+        </div>
+      </div>
+
+      <div class="side">
+        <dl class="kv" id="meta">
+          <dt>文件</dt><dd>—</dd>
+          <dt>时长</dt><dd>—</dd>
+          <dt>分辨率</dt><dd>—</dd>
+        </dl>
+        <div class="field">
+          <span>最大秒数</span>
+          <input id="maxSec" type="number" min="0" step="1" value="0" />
+          <span>0 = 全部</span>
+        </div>
+        <div class="field">
+          <label><input id="runB" type="checkbox" checked /> 包含 B（首次加载 20–40s）</label>
+        </div>
+        <div class="actions">
+          <button id="btnStart" class="primary" disabled>开始固定重放</button>
+          <button id="btnStop" disabled>停止</button>
+          <button id="btnRepeat" class="ghost" disabled>再跑一次并对比</button>
+          <button id="btnExport" class="ghost" disabled>导出 JSON</button>
+        </div>
+        <div class="progress"><div id="progressBar"></div></div>
+        <div id="progressText">等待选择视频。</div>
+        <div id="status">固定采样：15fps；窗口 30s；每秒一个检查点。</div>
+        <div id="log">就绪。</div>
+      </div>
+    </section>
+
+    <section class="metrics">
+      <article class="metric a">
+        <h2><span>A · POS + FFT</span><span class="tag">固定帧</span></h2>
+        <div class="big" id="aHr">—<small>bpm</small></div>
+        <div class="state" id="aState">未运行</div>
+        <div class="rows">
+          <span>置信度</span><span id="aConf">—</span>
+          <span>检查点</span><span id="aSpan">—</span>
+        </div>
+      </article>
+
+      <article class="metric aplus">
+        <h2><span>A+ · 共识簇 + Welch</span><span class="tag">固定帧</span></h2>
+        <div class="big" id="aplusHr">—<small>bpm</small></div>
+        <div class="state" id="aplusState">未运行</div>
+        <div class="rows">
+          <span>质量</span><span id="aplusQuality">—</span>
+          <span>SQI</span><span id="aplusSqi">—</span>
+          <span>原始 HR</span><span id="aplusRaw">—</span>
+        </div>
+      </article>
+
+      <article class="metric b">
+        <h2><span>B · FacePhys.rlap</span><span class="tag">固定帧</span></h2>
+        <div class="big" id="bHr">—<small>bpm</small></div>
+        <div class="state" id="bState">未运行</div>
+        <div class="rows">
+          <span>SQI</span><span id="bSqi">—</span>
+          <span>原始 HR</span><span id="bRaw">—</span>
+        </div>
+      </article>
+
+      <article class="metric det">
+        <h2><span>可重复性检查</span><span class="tag">同一固定 payload</span></h2>
+        <div class="det-grid">
+          <div><span>payload Hash</span><b id="detHash" class="muted">—</b></div>
+          <div><span>A 复跑一致</span><b id="detA" class="muted">—</b></div>
+          <div><span>A+ 复跑一致</span><b id="detAplus" class="muted">—</b></div>
+          <div><span>B 上次对比</span><b id="detB" class="muted">—</b></div>
+        </div>
+        <div class="note" id="detNote">首次运行后会自动复跑 A/A+；B 需要点“再跑一次并对比”验证。</div>
+      </article>
+    </section>
+
+    <section class="panel charts">
+      <div class="chart-box">
+        <h3>心率（检查点视频时间 / bpm）</h3>
+        <canvas id="hrChart" class="chart"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>质量（A 置信度 / A+ 质量 / B SQI）</h3>
+        <canvas id="qChart" class="chart"></canvas>
+      </div>
+    </section>
+
+    <section class="panel table-wrap">
+      <p class="hint-line">显示最后 16 个检查点；payload Hash 是同一窗口送进 A/A+ 的 JSON 指纹。</p>
+      <table>
+        <thead>
+          <tr><th>t (s)</th><th>Hash</th><th>A</th><th>A+</th><th>A+ 质量</th><th>A+ 可靠</th><th>B</th><th>B SQI</th></tr>
+        </thead>
+        <tbody id="tableBody">
+          <tr><td colspan="8" style="text-align:center;color:#8c9aad">尚未运行</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel note">
+      <b>这个页面解决什么：</b>实时页每次按浏览器播放采样，帧子集、人脸框、请求时刻都不同，所以同一视频结果会变。
+      这里改为按固定 15fps 抽帧、固定 seek 时间戳、固定人脸框、固定 30 秒窗口，并把视频时间传给 A+ / B 的稳定器；
+      同一份 payload 连跑两次，A/A+ 应逐点完全一致。B 的模型推理依赖服务端队列，首次运行后建议再跑一次对比。
+      这不是医疗级测量，仍只用于算法行为验证。
+    </section>
+  </div>
+
+  <script type="module" src="/replay.js"></script>
+</body>
+</html>

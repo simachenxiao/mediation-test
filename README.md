@@ -7,6 +7,9 @@
 A+（POS/CHROM/GREEN + Welch + SQI）和 B（FacePhys.rlap）边播边出结果，
 不再等整段视频跑完。
 
+还有一个**确定性重放页**：固定 15fps 抽帧、固定人脸框和 30 秒窗口，
+把视频时间传给 A+/B 稳定器，用来验证三路算法本身是否可重复。
+
 > 本目录是独立应用，**不会修改 `../code` 里的任何文件**；
 > 只以只读方式复用 `../code` 的模型、MediaPipe / onnxruntime-web 运行时和 Python 侧车。
 
@@ -54,6 +57,21 @@ A/A+/B 都使用 30 秒滑动窗口，视频播放期间会禁用进度条拖动
 
 A+ 是纯 NumPy/SciPy 侧车，不需要额外模型或新依赖；如果生命体征依赖已安装，A+ 就能启动。A+ 从约 12 秒开始，之后每约 1 秒更新一次；A 从约 8 秒开始，之后也每约 1 秒更新。
 
+### 确定性重放
+
+打开 `http://localhost:3200/replay`。
+
+它不按播放时钟采样，而是：
+
+- 固定 15fps seek 抽帧；
+- 每 5 帧检测一次人脸并复用固定框；
+- 在固定检查点构造同一份 30 秒 payload；
+- A/A+ 自动复跑两次并逐点比较；
+- A+/B 的稳定器使用 `replayTime`（视频时间），不用 wall clock；
+- B 需要点“再跑一次并对比”验证第二次。
+
+这不是更准的测量，而是把“输入变化”和“算法变化”分开。
+
 ### 可配置环境变量
 
 ```bash
@@ -76,12 +94,14 @@ test/
 ├── README.md                   本文件
 ├── docs/
 │   ├── 离线视频分析实验室.md    详细说明 / 模块 API
-│   └── 方法A的问题与A+改进.md   A 的问题、A+ 设计与参数
+│   └── 方法A的问题与A+改进.md   A 的问题、A+ 设计、确定性重放
 └── public/
     ├── lab.html                离线分步分析页
     ├── lab.js                  离线交互、步骤状态、图表、导出
     ├── live.html               实时 A / A+ / B 对比页
     ├── live.js                 实时播放、A/A+/B 采集与图表
+    ├── replay.html             确定性重放页
+    ├── replay.js               固定帧、固定窗口、复跑验证
     └── lib/
         ├── emotion.js          微表情模块（独立）
         ├── vitals.js           生命体征模块（独立）
@@ -102,6 +122,7 @@ test/
 | `/models/*` | `../code/models/*` |
 | `/physio/estimate` | 代理到本机 Python 侧车 `../code/physio_service` |
 | `/live` | 实时 A / A+ / B 对比页 |
+| `/replay` | 确定性重放页 |
 | `/aplus/estimate` | 代理到 `aplus_service.py`（A+ 纯信号处理侧车） |
 | `/deep/*` | 代理到 `deep_service.py`（FacePhys.rlap） |
 
@@ -154,5 +175,6 @@ pip install -r ../code/physio_service/requirements.txt
 - 视频只在浏览器本地解码，不上传；只有 ROI 颜色数值会发给本机 Python 侧车。
 - 建议视频：10 秒以上、正脸清晰、光照均匀、人脸尽量少晃动（rPPG 对运动敏感）。
 - 两个模块都支持 JSON / CSV 导出。
+- 实时页每次按播放采样，结果天然会有波动；要验证同一视频的算法可重复性，用 `/replay`。
 - 更详细的算法拆分与模块 API 见 [docs/离线视频分析实验室.md](docs/离线视频分析实验室.md)。
 - A 的六个问题与 A+ 设计见 [docs/方法A的问题与A+改进.md](docs/方法A的问题与A+改进.md)。
