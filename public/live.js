@@ -13,6 +13,9 @@ import { formatBytes, formatTime } from '/lib/video-frames.js';
 
 const $ = (id) => document.getElementById(id);
 
+// 人脸检测间隔。ROI 仍然每个播放帧采样；这里只决定框多久校正一次。
+const DETECT_INTERVAL_SEC = 0.1;
+
 const els = {
   drop: $('drop'),
   file: $('file'),
@@ -356,7 +359,7 @@ function onPlaybackFrame() {
   const v = els.video;
   const t = v.currentTime;
 
-  if (state.detector && !state.detecting && t - state.lastDetectAt >= 0.3) {
+  if (state.detector && !state.detecting && t - state.lastDetectAt >= DETECT_INTERVAL_SEC) {
     state.lastDetectAt = t;
     state.detecting = true;
     detectFaces(state.detector, v)
