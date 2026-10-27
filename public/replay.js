@@ -568,7 +568,7 @@ function resetResultUI() {
   $('aState').textContent = '未运行';
   $('aplusState').textContent = '未运行';
   $('bState').textContent = '未运行';
-  for (const id of ['aConf', 'aSpan', 'aplusQuality', 'aplusSqi', 'aplusRaw', 'bSqi', 'bRaw']) {
+  for (const id of ['aConf', 'aSpan', 'aplusQuality', 'aplusSqi', 'aplusRoi', 'aplusRaw', 'bSqi', 'bRaw']) {
     $(id).textContent = '—';
   }
   for (const id of ['detHash', 'detA', 'detAplus', 'detB']) {
@@ -628,11 +628,13 @@ function renderAll(run, { repeat = false } = {}) {
       : '低质量候选';
     $('aplusQuality').textContent = apLast.quality != null ? apLast.quality.toFixed(3) : '—';
     $('aplusSqi').textContent = apLast.sqi != null ? apLast.sqi.toFixed(3) : '—';
+    $('aplusRoi').textContent = apLast.activeRoi ? `${apLast.activeRoi}${apLast.fallback ? '（回退）' : ''}` : '—';
     $('aplusRaw').textContent = apLast.rawHr != null ? `${apLast.rawHr.toFixed(1)} bpm` : '—';
   } else {
     $('aplusState').textContent = '无结果';
     $('aplusQuality').textContent = '—';
     $('aplusSqi').textContent = '—';
+    $('aplusRoi').textContent = '—';
     $('aplusRaw').textContent = '—';
   }
 

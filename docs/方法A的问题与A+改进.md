@@ -760,29 +760,40 @@ server.mjs         # /replay 路由；/deep/result POST 代理
 
 ---
 
-## 12. POS-only 改造（当前版本）
+## 12. POS-only + 额头优先（当前版本）
 
 ### 12.1 改动
 
 - `METHODS` 只保留 `POS`
 - 删除 `_chrom` / `_green`
-- 候选数从 12 变成 4：
+- 不再把 forehead / cheeks 同时放进候选池
+- 先构造 forehead 的 POS × 双频带候选
+- 只有 forehead **没有可用候选**时，才回退到 cheeks：
+  - forehead 有效数据不足
+  - 或 forehead 所有候选的 HR 都无效
+- 候选数：
   ```text
-  2 ROI × POS × 2 频带
+  当前主 ROI × POS × 2 频带
+  = 2 个候选
   ```
-- `supportMethods` 恒为 1，不再用于可靠判定
-- `agreement` 改为 `supportRois / 2`
+- `supportMethods` 恒为 1，`supportRois` 也恒为 1
+- 不再用 `supportRois >= 2` 做可靠判定
+- `agreement` 固定为 1，因为只使用一个主 ROI
 - `reliable` 改为：
   ```python
-  support_rois >= 2
-  and not edge
+  not edge
   and near_conf >= 0.01
   and quality >= 0.30
   and near_sqi >= 0.22
   and near_margin >= 1.10
   ```
-- 次谐波检查从 `supportMethods >= 2` 改为 `supportRois >= 2`
-- 簇排序中 ROI 权重从 0.5 提到 0.75
+- 次谐波检查改为要求低簇至少有两个候选成员
+- 结果新增：
+  ```text
+  activeRoi: forehead / cheeks
+  fallback: true/false
+  method: POS / forehead 或 POS / cheeks (fallback)
+  ```
 
 ### 12.2 结果
 
@@ -799,32 +810,58 @@ server.mjs         # /replay 路由；/deep/result POST 代理
 45 → 47.9（轻微偏差）
 ```
 
+合成信号的额头/脸颊回退测试：
+
+```text
+forehead + cheeks 都有值：
+  activeRoi = forehead, fallback = false, reliable = true
+
+只有 forehead：
+  activeRoi = forehead, fallback = false, reliable = true
+
+只有 cheeks：
+  activeRoi = cheeks, fallback = true, reliable = true
+
+两边都没有：
+  ready = false
+```
+
 `测试视频_cfr30.mp4` 40 秒固定重放：
 
 ```text
 A/A+ 复跑：payload 33/33，A 33/33，A+ 29/29
+A+ 全程使用 forehead（没有触发 fallback）
 A+ 全程 reliable = false
 confidence 约 0.003–0.005
-quality 约 0.1–0.2
-页面显示低质量候选，最终约 93bpm
+quality 约 0.08–0.21
+最终低质量候选约 60.4bpm
+33 秒不再跳到 91bpm
 ```
 
 这说明：
 
-- 删掉 CHROM/GREEN 后，A+ 不再出现“3 方法+2 ROI 同时支持 91”的虚假共识；
-- 但这段视频本身质量太低，POS-only 达不到 `confidence >= 0.01`，所以 A+ 变得更保守，**始终不进入 reliable**；
-- 它不会再把 91 锁成稳定值，但会显示低质量候选 93/78/162 等，仍需结合质量看。
+- 额头优先避免了脸颊/手部把 91bpm 抬成主簇；
+- 但这段视频的 forehead POS confidence 也只有 0.003–0.005，达不到 0.01；
+- 所以 A+ 仍然很保守，始终不进入 reliable；
+- 这是“宁可不出可信值，也不锁错”的行为，不是随机抖动。
 
 ### 12.3 结论
 
-POS-only 是可行的，但代价是：
+POS-only + 额头优先更简单、更接近 A：
+
+```text
+A：forehead POS → FFT
+A+：forehead POS → 双频带 → Welch → SQI → 稳定器
+```
+
+代价是：
 
 1. 失去 CHROM/GREEN 的交叉验证；
-2. 低质量视频上可靠结果会明显变少；
-3. 必须依赖 POS 自身的 confidence、SQI、margin 和运动门控。
+2. 单 ROI 时没有跨 ROI 共识；
+3. 低质量视频上 reliable 会明显变少；
+4. 回退到脸颊时需要迟滞，避免来回切换。
 
 如果希望在低质量视频上仍能出 reliable，需要进一步做：
 - ROI 运动/遮挡检测；
 - 更细的 confidence/SQI 阈值标定；
-- 允许单 ROI 在置信度很高时通过；
 - 用接触式 ECG 真值校准，而不是只凭这段视频调阈值。

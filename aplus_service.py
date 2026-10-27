@@ -5,7 +5,7 @@ A+ 不是 B 的替代品，而是在 A（POS + 单次 FFT）基础上补上 B �
 
   1. 平滑先验去趋势，替代 A 的线性去趋势；
   2. 频带下界从 0.7Hz 提到 0.8Hz，避开慢漂移最容易造假的区域；
-  3. 只保留 POS 方法，额头 / 脸颊多 ROI + 双频带交叉候选；
+  3. 只保留 POS 方法；额头优先，额头没有可用候选时才回退到脸颊；
   4. Welch 多段平均，替代单次 FFT 取最大峰；
   5. 峰值置信度 + 自相关 SQI + 第一名/第二名差距 + ROI 一致性；
   6. 心率稳定器：限速 + EMA + 低质量保持；
@@ -234,6 +234,24 @@ def _weighted_median(items: list[tuple[float, float]]) -> float:
     return float(items[-1][0])
 
 
+def _roi_candidates(
+    rgb: np.ndarray, fs: float, roi_name: str
+) -> list[dict[str, Any]]:
+    """为一个 ROI 构造 POS + 双频带候选。"""
+    out: list[dict[str, Any]] = []
+    if rgb.shape[0] < int(6 * fs):
+        return out
+    for method in METHODS:
+        for band_name, band, detrend_min in (
+            ("std", BAND_HZ, BAND_HZ[0]),
+            ("low", LOW_BAND_HZ, LOW_BAND_HZ[0]),
+        ):
+            got = _candidate(rgb, fs, roi_name, method, band_name, band, detrend_min)
+            if got:
+                out.append(got)
+    return out
+
+
 def _candidate(
     rgb: np.ndarray,
     fs: float,
@@ -340,7 +358,7 @@ def _select_cluster(
             for cl in clusters
             if cl is not primary
             and abs(cl["hr"] - half) <= 6.0
-            and cl["supportRois"] >= 2
+            and len(cl["members"]) >= 2
         ]
         if subs:
             sub = max(subs, key=lambda cl: cl["rank"])
@@ -457,55 +475,46 @@ class AplusSession:
         right = _clean_rgb(payload.get("right_cheek"))
         cheeks = _mean_roi(left, right)
 
-        rois: list[tuple[str, np.ndarray]] = []
-        if forehead.shape[0] >= int(6 * fs):
-            rois.append(("forehead", forehead))
-        if cheeks.shape[0] >= int(6 * fs):
-            rois.append(("cheeks", cheeks))
-        if not rois:
-            return {"ready": False, "error": "没有足够的 ROI 数据", "nSamples": n}
-
-        candidates: list[dict[str, Any]] = []
-        for roi_name, rgb in rois:
-            # 两边通道长度可能不同，统一截到共同长度
+        # 额头优先：只有额头没有可用候选时，才回退到脸颊。
+        # 不把 forehead / cheeks 同时放进候选池，避免跨 ROI 伪共识。
+        def prepare(rgb: np.ndarray) -> np.ndarray:
             if rgb.shape[0] != n:
                 m = min(rgb.shape[0], n)
-                rgb = rgb[:m]
-            for method in METHODS:
-                for band_name, band, detrend_min in (
-                    ("std", BAND_HZ, BAND_HZ[0]),
-                    ("low", LOW_BAND_HZ, LOW_BAND_HZ[0]),
-                ):
-                    got = _candidate(rgb, fs, roi_name, method, band_name, band, detrend_min)
-                    if got:
-                        candidates.append(got)
+                return rgb[:m]
+            return rgb
+
+        active_roi = "forehead"
+        candidates = _roi_candidates(prepare(forehead), fs, "forehead")
+        if not candidates and cheeks.shape[0] >= int(6 * fs):
+            active_roi = "cheeks"
+            candidates = _roi_candidates(prepare(cheeks), fs, "cheeks")
 
         if not candidates:
-            return {"ready": False, "error": "所有方法都没有得到有效心率", "nSamples": n}
+            return {"ready": False, "error": "额头和脸颊都没有得到有效心率", "nSamples": n}
 
         primary, clusters = _select_cluster(candidates, self.stabilizer.smoothed)
         members = primary["members"]
         raw_hr = float(primary["hr"])
         support_methods = int(primary["supportMethods"])
         support_rois = int(primary["supportRois"])
-        agreement = min(1.0, support_rois / 2.0)
-        method_label = " + ".join(primary["methods"])
-        if support_rois > 1:
-            method_label += " / 多 ROI"
+        # 主 ROI 只有一个，method_label 明确显示当前来源和是否回退。
+        method_label = "POS / " + active_roi
+        if active_roi == "cheeks":
+            method_label += " (fallback)"
+        agreement = 1.0
 
         near_conf = max(float(c["confidence"]) for c in members)
         near_sqi = max(float(c["sqi"]) for c in members)
         near_margin = max(float(c["margin"]) for c in members)
         margin_score = float(np.clip((near_margin - 1.0) / 1.5, 0.0, 1.0))
         base_quality = 0.45 * near_conf + 0.35 * near_sqi + 0.20 * margin_score
-        quality = float(np.clip(base_quality * (0.70 + 0.30 * agreement), 0.0, 1.0))
+        quality = float(np.clip(base_quality, 0.0, 1.0))
 
-        # 峰值太贴近所用频带下边界时，可能只是慢漂移。
-        # POS-only 没有多方法可交叉验证，要求两个 ROI 同时支持 + 频谱置信度下限。
+        # 单 ROI 不能再用 supportRois>=2；改用频谱置信度 + 质量门控。
+        # 运动门控尚未接入，低 confidence 时宁可不初始化稳定值。
         edge = bool(abs(raw_hr - float(primary["bandLow"]) * 60.0) <= 4.0)
         reliable = bool(
-            support_rois >= 2
-            and not edge
+            not edge
             and near_conf >= RELIABLE_MIN_CONF
             and quality >= 0.30
             and near_sqi >= 0.22
@@ -537,6 +546,8 @@ class AplusSession:
                 "edge": edge,
                 "supportMethods": support_methods,
                 "supportRois": support_rois,
+                "activeRoi": active_roi,
+                "fallback": active_roi == "cheeks",
                 "method": method_label,
                 "agreement": round(float(agreement), 3),
                 "bandHz": [float(primary["bandLow"]), float(primary["bandHigh"])],
