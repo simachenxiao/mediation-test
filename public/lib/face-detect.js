@@ -9,7 +9,6 @@ const MODEL_PATH = '/models/blaze_face_short_range.tflite';
 const WASM_PATH = '/wasm';
 
 let detectorPromise = null;
-let detectorDelegate = '';
 // MediaPipe VIDEO 模式要求时间戳单调递增。离线分析会反复从 t=0 开始，
 // 因此这里用一个只增不减的内部时钟，与视频真实时间解耦。
 let detectClock = 0;
@@ -24,7 +23,6 @@ async function createDetector() {
         runningMode: 'VIDEO',
         minDetectionConfidence: 0.5,
       });
-      detectorDelegate = delegate;
       return detector;
     } catch (err) {
       lastErr = err;
@@ -43,10 +41,6 @@ export function getFaceDetector() {
     });
   }
   return detectorPromise;
-}
-
-export function faceDetectorInfo() {
-  return { delegate: detectorDelegate || '—' };
 }
 
 /** 单帧检测；source 可以是 canvas / video / image。返回 detections 数组。 */

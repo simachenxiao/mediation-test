@@ -109,10 +109,10 @@ A+ 只借鉴 B 的**后处理和质量控制**，不引入 FacePhys 模型：
 
 1. 平滑先验去趋势，替代线性去趋势
 2. 频带下界 0.7 → 0.8Hz
-3. POS / CHROM / GREEN 多方法
-4. 额头 / 脸颊多 ROI
+3. POS 单方法
+4. 额头优先，额头没有可用候选时回退脸颊
 5. Welch 多段平均，替代单次 FFT
-6. 峰值置信度 + 自相关 SQI + 第一名/第二名差距 + 方法一致性
+6. 峰值置信度 + 自相关 SQI + 第一名/第二名差距
 7. 综合质量 `quality` 和可信标记 `reliable`
 8. 心率稳定器：限速 + EMA + 低质量保持
 9. 同时返回 `rawHr` 和 `hr`，页面可对照
@@ -165,7 +165,7 @@ alpha = std(s1) / std(s2)
 s = s1 + alpha * s2
 ```
 
-CHROM / GREEN 已从 A+ 侧车移除。保留双频带、双 ROI、Welch、SQI 和稳定器，
+CHROM / GREEN 已从 A+ 侧车移除。保留双频带、额头优先/脸颊回退、Welch、SQI 和稳定器，
 但不再用三种方法做交叉验证。
 
 > 历史版本曾使用 POS / CHROM / GREEN 三方法；由于三者在手部运动/光照变化时高度相关，
@@ -243,13 +243,13 @@ Hann 窗
 
 ```text
 base = 0.45*confidence + 0.35*sqi + 0.20*marginScore
-quality = base * (0.70 + 0.30*agreement)
+quality = 0.45*confidence + 0.35*SQI + 0.20*margin_score
 ```
 
 `reliable` 条件（P0 修复后）：
 
 ```text
-supportMethods >= 2          # 至少两个不同方法支持
+not edge
 不是“边缘单方法峰”
 quality >= 0.30
 sqi >= 0.22
@@ -282,12 +282,12 @@ quality < 0.22：保持上一个值，状态 holding
 
 | | A | A+ | B |
 |---|---|---|---|
-| 核心 | POS + 单次 FFT | POS/CHROM/GREEN + Welch + SQI | FacePhys.rlap |
+| 核心 | POS + 单次 FFT | POS + 额头优先 + Welch + SQI | FacePhys.rlap |
 | 输入 | ROI 平均 RGB | 同一份 ROI 平均 RGB | 人脸 36×36 图像 |
 | 去趋势 | 线性 | 平滑先验 | 平滑先验 |
 | 频带 | 0.7–4.0Hz | 0.8–3.5Hz + 0.6–3.5Hz | 0.5–3.0Hz |
-| 选峰 | 单次最大峰 | Welch + 多方法共识 | Welch + 模型 BVP |
-| 质量 | 峰值功率占比 | confidence + SQI + margin + agreement | SQI |
+| 选峰 | 单次最大峰 | Welch + 双频带簇 | Welch + 模型 BVP |
+| 质量 | 峰值功率占比 | confidence + SQI + margin | SQI |
 | 平滑 | 无 | 限速 + EMA | 限速 + EMA |
 | 首次结果 | 约 8s | 约 12s | 约 30s |
 | 计算 | 轻 | 轻 | 重（JAX） |
@@ -501,8 +501,8 @@ A+ 从 8 秒开始出结果，但 `nperseg = 8s`，8 秒窗口只有 **1 段** W
 已对 `aplus_service.py` 做了 P0 修复：
 
 - 增加 `0.6–3.5Hz` 低频带候选
-- POS/CHROM/GREEN × 额头/脸颊 × 双频带候选
-- 候选按心率聚类，优先“不同方法/不同 ROI 的共识簇”
+- POS × 额头优先/脸颊回退 × 双频带候选
+- 候选按心率聚类，比较双频带候选的分数与时间连续性
 - 增加次谐波检查（主簇约为另一簇 2 倍时，优先有共识的低簇）
 - 增加边缘峰保护
 - `reliable` 要求至少两个不同方法支持
@@ -613,7 +613,7 @@ B  ≈ 74bpm
 
 两者不是同一条信号链：
 
-- A+：额头/脸颊平均颜色 → POS/CHROM/GREEN → 去趋势/带通 → Welch → 共识簇
+- A+：额头/脸颊平均颜色 → POS → 去趋势/带通 → Welch → 双频带簇
 - B：整脸 36×36 → FacePhys.rlap → BVP → Welch → SQI → 稳定器
 
 差异来源：
@@ -776,9 +776,8 @@ server.mjs         # /replay 路由；/deep/result POST 代理
   当前主 ROI × POS × 2 频带
   = 2 个候选
   ```
-- `supportMethods` 恒为 1，`supportRois` 也恒为 1
-- 不再用 `supportRois >= 2` 做可靠判定
-- `agreement` 固定为 1，因为只使用一个主 ROI
+- 结果只保留 `activeRoi` 和 `fallback`，不再输出无意义的 `supportMethods` / `supportRois`
+- 不再用多 ROI 支持数做可靠判定
 - `reliable` 改为：
   ```python
   not edge

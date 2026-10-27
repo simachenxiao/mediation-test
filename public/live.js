@@ -83,7 +83,6 @@ const state = {
   aplusQ: [],
   bQ: [],
   internalSeek: false,
-  startWall: 0,
 };
 
 const frameCanvas = document.createElement('canvas');
@@ -699,7 +698,6 @@ async function startAnalysis() {
   state.lastAPlusCallAt = -Infinity;
   state.lastBSendAt = -Infinity;
   state.a.reset();
-  state.startWall = performance.now();
   els.video.controls = false;
   updateStartButton();
   setStatus('实时分析中：视频 1× 播放，A / A+ / B 边播边算…');

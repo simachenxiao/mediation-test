@@ -12,6 +12,7 @@ import {
   ensureVideoReady,
   seekTo,
   planFrameTimes,
+  createFrameGrabber,
   formatBytes,
   formatTime,
 } from '/lib/video-frames.js';
@@ -45,8 +46,6 @@ const state = {
   last: null,
   previous: null,
   detector: null,
-  deepReady: false,
-  deepLoading: false,
 };
 
 // --------------------------------------------------------------------------- //
@@ -204,15 +203,12 @@ function setDeepPill(mode, text) {
 async function refreshDeepPill() {
   try {
     const h = await fetchJson('/deep/health');
-    state.deepReady = !!h.ready;
-    state.deepLoading = !!h.loading;
     if (h.ready) setDeepPill('ready', 'B 已就绪');
     else if (h.loading) setDeepPill('loading', 'B 加载中…');
     else if (h.error) setDeepPill('error', `B 错误：${String(h.error).slice(0, 40)}`);
     else setDeepPill('', 'B 未启动');
     return h;
   } catch (err) {
-    state.deepReady = false;
     setDeepPill('error', 'B 不可用');
     return { ready: false, error: err.message };
   }
@@ -247,10 +243,7 @@ async function extractFrames(endSec) {
   const meta = state.meta;
   if (!video || !meta) throw new Error('视频未就绪');
   const times = planFrameTimes(meta.duration, FPS, { maxSeconds: endSec });
-  const grabber = await (async () => {
-    const { createFrameGrabber } = await import('/lib/video-frames.js');
-    return createFrameGrabber(video, { maxWidth: 960 });
-  })();
+  const grabber = createFrameGrabber(video, { maxWidth: 960 });
 
   if (!state.detector) {
     setStatus('加载人脸检测器…');

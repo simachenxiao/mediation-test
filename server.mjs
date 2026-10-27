@@ -5,7 +5,7 @@
 //   * 以只读方式复用 ../code 里的 MediaPipe / onnxruntime-web / 模型文件
 //   * 拉起 ../code/physio_service 的 Python 侧车，并代理 /physio/estimate
 //   * 拉起本地 deep_service.py（Open-rppg FacePhys.rlap），供实时 B 引擎使用
-//   * 拉起本地 aplus_service.py（POS/CHROM/GREEN + Welch + SQI），供实时 A+ 对比
+//   * 拉起本地 aplus_service.py（POS + 额头优先 + Welch + SQI），供实时 A+ 对比
 //
 // 不会写入或修改 ../code 里的任何文件。
 //
@@ -605,7 +605,7 @@ async function handle(req, res) {
   }
 
 
-  // ---- A+ 引擎（POS/CHROM/GREEN + Welch + SQI） ----
+  // ---- A+ 引擎（POS + 额头优先 + Welch + SQI） ----
   if (pathname === '/aplus/health') {
     try {
       const upstream = await aplusFetch('/health');

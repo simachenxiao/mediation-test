@@ -7,7 +7,7 @@ A+ 不是 B 的替代品，而是在 A（POS + 单次 FFT）基础上补上 B �
   2. 频带下界从 0.7Hz 提到 0.8Hz，避开慢漂移最容易造假的区域；
   3. 只保留 POS 方法；额头优先，额头没有可用候选时才回退到脸颊；
   4. Welch 多段平均，替代单次 FFT 取最大峰；
-  5. 峰值置信度 + 自相关 SQI + 第一名/第二名差距 + ROI 一致性；
+  5. 峰值置信度 + 自相关 SQI + 第一名/第二名差距；
   6. 心率稳定器：限速 + EMA + 低质量保持；
   7. 返回 rawHr / hr / quality / reliable，页面可以同时看原始值和稳定值。
 
@@ -130,11 +130,6 @@ def _pos(rgb: np.ndarray) -> np.ndarray:
     return _normalize(s)
 
 
-METHODS = {
-    "POS": _pos,
-}
-
-
 def _parabolic(psd: np.ndarray, idx: int) -> tuple[float, float]:
     if idx <= 0 or idx >= len(psd) - 1:
         return float(idx), float(psd[idx])
@@ -241,14 +236,13 @@ def _roi_candidates(
     out: list[dict[str, Any]] = []
     if rgb.shape[0] < int(6 * fs):
         return out
-    for method in METHODS:
-        for band_name, band, detrend_min in (
-            ("std", BAND_HZ, BAND_HZ[0]),
-            ("low", LOW_BAND_HZ, LOW_BAND_HZ[0]),
-        ):
-            got = _candidate(rgb, fs, roi_name, method, band_name, band, detrend_min)
-            if got:
-                out.append(got)
+    for band_name, band, detrend_min in (
+        ("std", BAND_HZ, BAND_HZ[0]),
+        ("low", LOW_BAND_HZ, LOW_BAND_HZ[0]),
+    ):
+        got = _candidate(rgb, fs, roi_name, band_name, band, detrend_min)
+        if got:
+            out.append(got)
     return out
 
 
@@ -256,15 +250,13 @@ def _candidate(
     rgb: np.ndarray,
     fs: float,
     roi: str,
-    method: str,
     band_name: str,
     band: tuple[float, float],
     detrend_min_freq: float,
 ) -> dict[str, Any] | None:
     if rgb.shape[0] < int(6 * fs):
         return None
-    fn = METHODS[method]
-    pulse = fn(rgb)
+    pulse = _pos(rgb)
     pulse = _smooth_detrend(pulse, fs, min_freq=detrend_min_freq)
     pulse = _bandpass(pulse, fs, low=band[0], high=band[1])
     hr, conf, margin = _welch_hr(pulse, fs, band=band)
@@ -275,7 +267,6 @@ def _candidate(
     score = 0.45 * conf + 0.35 * sqi + 0.20 * margin_score
     return {
         "roi": roi,
-        "method": method,
         "band": band_name,
         "bandLow": band[0],
         "bandHigh": band[1],
@@ -289,7 +280,7 @@ def _candidate(
 
 
 def _cluster_candidates(candidates: list[dict[str, Any]], tol: float = 6.0) -> list[dict[str, Any]]:
-    """按心率把候选聚成簇；优先看不同方法/ROI 的共识，而不是单个最高分。"""
+    """按心率把双频带候选聚成簇。"""
     remaining = sorted(candidates, key=lambda c: c["score"], reverse=True)
     clusters: list[dict[str, Any]] = []
     while remaining:
@@ -303,19 +294,13 @@ def _cluster_candidates(candidates: list[dict[str, Any]], tol: float = 6.0) -> l
                 rest.append(c)
         remaining = rest
 
-        methods = {c["method"] for c in group}
-        rois = {c["roi"] for c in group}
         weight = sum(float(c["score"]) for c in group)
         center = _weighted_median([(c["hr"], max(c["score"], 1e-6)) for c in group])
         clusters.append(
             {
                 "hr": round(center, 1),
                 "members": group,
-                "supportMethods": len(methods),
-                "supportRois": len(rois),
                 "weight": round(weight, 3),
-                "methods": sorted(methods),
-                "rois": sorted(rois),
                 "bandLow": min(float(c.get("bandLow", BAND_HZ[0])) for c in group),
                 "bandHigh": max(float(c.get("bandHigh", BAND_HZ[1])) for c in group),
             }
@@ -329,9 +314,8 @@ def _select_cluster(
     """返回主簇和全部簇。
 
     排序依据：
-      1. 不同 ROI 数量（额头/脸颊）
-      2. 候选分数总和
-      3. 与上一轮稳定值的接近程度（防止在 76/111 两个簇之间来回跳）
+      1. 候选分数总和
+      2. 与上一轮稳定值的接近程度（防止在 76/111 两个簇之间来回跳）
     """
     clusters = _cluster_candidates(candidates)
     for cl in clusters:
@@ -339,17 +323,11 @@ def _select_cluster(
         if prior_hr is not None and abs(cl["hr"] - float(prior_hr)) <= 8.0:
             prior_bonus = 0.35
         cl["priorBonus"] = prior_bonus
-        # POS-only 时 supportMethods 恒为 1，因此把 ROI 支持的权重提高。
-        cl["rank"] = (
-            cl["supportMethods"]
-            + 0.75 * cl["supportRois"]
-            + cl["weight"]
-            + prior_bonus
-        )
+        cl["rank"] = cl["weight"] + prior_bonus
 
     primary = max(clusters, key=lambda cl: cl["rank"])
 
-    # 次谐波检查：如果主簇约为另一簇的 2 倍，且另一簇有两个 ROI 支持，
+    # 次谐波检查：如果主簇约为另一簇的 2 倍，且低簇由两个频带支持，
     # 优先选低的那一簇。用于修复 45bpm 被报成 90bpm。
     if primary["hr"] >= 70.0:
         half = primary["hr"] / 2.0
@@ -495,13 +473,10 @@ class AplusSession:
         primary, clusters = _select_cluster(candidates, self.stabilizer.smoothed)
         members = primary["members"]
         raw_hr = float(primary["hr"])
-        support_methods = int(primary["supportMethods"])
-        support_rois = int(primary["supportRois"])
         # 主 ROI 只有一个，method_label 明确显示当前来源和是否回退。
         method_label = "POS / " + active_roi
         if active_roi == "cheeks":
             method_label += " (fallback)"
-        agreement = 1.0
 
         near_conf = max(float(c["confidence"]) for c in members)
         near_sqi = max(float(c["sqi"]) for c in members)
@@ -510,8 +485,7 @@ class AplusSession:
         base_quality = 0.45 * near_conf + 0.35 * near_sqi + 0.20 * margin_score
         quality = float(np.clip(base_quality, 0.0, 1.0))
 
-        # 单 ROI 不能再用 supportRois>=2；改用频谱置信度 + 质量门控。
-        # 运动门控尚未接入，低 confidence 时宁可不初始化稳定值。
+        # 单 ROI 用频谱置信度 + 质量门控；运动门控尚未接入。
         edge = bool(abs(raw_hr - float(primary["bandLow"]) * 60.0) <= 4.0)
         reliable = bool(
             not edge
@@ -544,23 +518,13 @@ class AplusSession:
                 "status": status,
                 "heldSec": held_sec,
                 "edge": edge,
-                "supportMethods": support_methods,
-                "supportRois": support_rois,
                 "activeRoi": active_roi,
                 "fallback": active_roi == "cheeks",
                 "method": method_label,
-                "agreement": round(float(agreement), 3),
                 "bandHz": [float(primary["bandLow"]), float(primary["bandHigh"])],
                 "candidates": candidates,
                 "clusters": [
-                    {
-                        "hr": cl["hr"],
-                        "supportMethods": cl["supportMethods"],
-                        "supportRois": cl["supportRois"],
-                        "weight": cl["weight"],
-                        "methods": cl["methods"],
-                        "rois": cl["rois"],
-                    }
+                    {"hr": cl["hr"], "weight": cl["weight"]}
                     for cl in clusters
                 ],
                 "nSamples": int(n),
