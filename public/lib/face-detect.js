@@ -1,11 +1,13 @@
-// 人脸检测（MediaPipe BlazeFace）——微表情与生命体征两条流水线共用。
+// 人脸检测（MediaPipe BlazeFace Full Range）——微表情与生命体征两条流水线共用。
 //
 // 只负责“在某一帧上找人脸”，不做任何情绪 / 生理计算，
 // 因此两个功能模块可以各自独立调用，也可以共用同一个检测器实例。
 
 import { FaceDetector, FilesetResolver } from '/mediapipe/vision_bundle.mjs';
 
-const MODEL_PATH = '/models/blaze_face_short_range.tflite';
+// full-range 版专为更小/更远的人脸设计；short-range 版在 128×128 输入下
+// 人脸低于画面高度约 20% 就会漏检。模型放在 test/models，不修改 ../code。
+const MODEL_PATH = '/local-models/blaze_face_full_range.tflite';
 const WASM_PATH = '/wasm';
 
 let detectorPromise = null;

@@ -633,7 +633,7 @@ function renderEmotionResult(result) {
     ['检出人脸', String(result.summary.faceFrames), result.summary.faceFrames ? 'ok' : 'warn'],
     ['检出率', pct(result.summary.detectionRate)],
     ['平均检测人脸数', fixed(frames.reduce((a, f) => a + f.detCount, 0) / Math.max(1, total), 2)],
-    ['检测器', 'BlazeFace (MediaPipe)'],
+    ['检测器', 'BlazeFace Full Range'],
   ]);
 
   // 03 裁剪

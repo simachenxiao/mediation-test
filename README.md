@@ -35,6 +35,7 @@ npm start
    - `node_modules/@mediapipe/tasks-vision`
    - `node_modules/onnxruntime-web/dist`
    - `models/`（BlazeFace + 情绪 ONNX）
+   - `test/models/blaze_face_full_range.tflite`（本仓库自带，用于更小的人脸）
    - `physio_service/`（rPPG Python 侧车）
 2. 生命体征需要 Python 依赖：
 
@@ -43,6 +44,22 @@ pip install -r ../code/physio_service/requirements.txt
 ```
 
 微表情不依赖 Python；Python 没装时生命体征会提示侧车未启动，其余功能正常。
+
+### 人脸检测器
+
+`public/lib/face-detect.js` 使用 **MediaPipe BlazeFace Full Range**：
+
+```text
+模型：test/models/blaze_face_full_range.tflite
+URL ：/local-models/blaze_face_full_range.tflite
+```
+
+上一个版本用的是 `../code/models/blaze_face_short_range.tflite`（128×128 输入）。
+实测在 1280×720 画面里，人脸低于画面高度约 20% 就会漏检；
+换成 full-range 后，约 7%（50px 高）仍能稳定检出，实测 40px 左右才失败。
+
+模型文件随本仓库提交，不修改 `../code`。如果换了模型或想对比，改
+`public/lib/face-detect.js` 里的 `MODEL_PATH` 即可。
 
 ### 实时 A / A+ / B 对比（B 引擎）
 
@@ -116,6 +133,8 @@ test/
 ├── aplus_service.py            A+ 侧车：POS + Welch + SQI
 ├── package.json                npm start -> node server.mjs
 ├── README.md                   本文件
+├── models/
+│   └── blaze_face_full_range.tflite  full-range 人脸检测模型
 ├── docs/
 │   ├── 离线视频分析实验室.md    详细说明 / 模块 API
 │   └── 方法A的问题与A+改进.md   A 的问题、A+ 设计、确定性重放
@@ -132,7 +151,7 @@ test/
     └── lib/
         ├── emotion.js          微表情模块（独立）
         ├── vitals.js           生命体征模块（独立）
-        ├── face-detect.js      MediaPipe 人脸检测
+        ├── face-detect.js      MediaPipe BlazeFace Full Range 检测
         ├── roi.js              面部 ROI 像素采样
         ├── physio-live.js      实时 A 采样（30s 窗口，A+ 复用）
         ├── video-frames.js     抽帧 / seek / 重采样
@@ -147,6 +166,7 @@ test/
 | `/wasm/*` | `../code/node_modules/@mediapipe/tasks-vision/wasm/*` |
 | `/ort/*` | `../code/node_modules/onnxruntime-web/dist/*` |
 | `/models/*` | `../code/models/*` |
+| `/local-models/*` | `test/models/*` |
 | `/physio/estimate` | 代理到本机 Python 侧车 `../code/physio_service` |
 | `/live` | 实时 A / A+ / B 对比页 |
 | `/replay` | 确定性重放页 |

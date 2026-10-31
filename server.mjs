@@ -30,6 +30,7 @@ const REQUIRED = [
   path.join(NODE_MODULES, 'onnxruntime-web/dist'),
   path.join(CODE, 'models'),
   path.join(CODE, 'physio_service'),
+  path.join(ROOT, 'models', 'blaze_face_full_range.tflite'),
 ];
 
 const MIME = {
@@ -555,6 +556,8 @@ function readBody(req, limit = 8 * 1024 * 1024) {
 
 // 静态目录映射：/mediapipe /wasm /ort /models 都只读指向 ../code
 const MOUNTS = [
+  // test/models 只放本目录自带的模型（如 full-range 人脸检测），不改 ../code
+  { prefix: '/local-models/', dir: path.join(ROOT, 'models'), cache: 'public, max-age=86400' },
   { prefix: '/mediapipe/', dir: path.join(NODE_MODULES, '@mediapipe/tasks-vision'), cache: 'public, max-age=86400' },
   { prefix: '/wasm/', dir: path.join(NODE_MODULES, '@mediapipe/tasks-vision/wasm'), cache: 'public, max-age=86400' },
   { prefix: '/ort/', dir: path.join(NODE_MODULES, 'onnxruntime-web/dist'), cache: 'public, max-age=86400' },
