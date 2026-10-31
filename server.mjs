@@ -6,6 +6,7 @@
 //   * 拉起 ../code/physio_service 的 Python 侧车，并代理 /physio/estimate
 //   * 拉起本地 deep_service.py（Open-rppg FacePhys.rlap），供实时 B 引擎使用
 //   * 拉起本地 aplus_service.py（POS + 额头优先 + Welch + SQI），供实时 A+ 对比
+//   * 摄像头页 /camera：本地摄像头输入，A / A+ / B 三路结果与历史曲线
 //
 // 不会写入或修改 ../code 里的任何文件。
 //
@@ -753,6 +754,13 @@ async function handle(req, res) {
     return sendJson(res, 405, { error: 'method not allowed' });
   }
 
+  // 浏览器会自动请求 favicon.ico；没有图标时直接回 204，避免控制台报 404
+  if (pathname === '/favicon.ico') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   // ---- 页面 ----
   if (pathname === '/' || pathname === '/lab' || pathname === '/lab.html') {
     return sendFile(res, path.join(PUBLIC, 'lab.html'), 'no-cache')
@@ -770,6 +778,12 @@ async function handle(req, res) {
     return sendFile(res, path.join(PUBLIC, 'replay.html'), 'no-cache')
       ? undefined
       : sendJson(res, 404, { error: 'replay.html not found' });
+  }
+
+  if (pathname === '/camera' || pathname === '/camera.html') {
+    return sendFile(res, path.join(PUBLIC, 'camera.html'), 'no-cache')
+      ? undefined
+      : sendJson(res, 404, { error: 'camera.html not found' });
   }
 
   // ---- 只读依赖 ----
@@ -815,6 +829,7 @@ server.listen(PORT, HOST, () => {
   console.log(`🧪 离线分析实验室: http://localhost:${PORT}/`);
   console.log(`实时 A / A+ / B 对比: http://localhost:${PORT}/live`);
   console.log(`确定性重放: http://localhost:${PORT}/replay`);
+  console.log(`摄像头三路对比: http://localhost:${PORT}/camera`);
   console.log(`   页面目录: ${PUBLIC}`);
   console.log(`   只读依赖: ${CODE}`);
   ensurePhysio().catch((err) => console.error('[physio] 预启动失败:', err.message));

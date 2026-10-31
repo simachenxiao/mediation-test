@@ -10,6 +10,9 @@ A+（POS + Welch + SQI，额头优先）和 B（FacePhys.rlap）边播边出结�
 还有一个**确定性重放页**：固定 15fps 抽帧、固定人脸框和 30 秒窗口，
 把视频时间传给 A+/B 稳定器，用来验证三路算法本身是否可重复。
 
+以及一个**摄像头实时页 `/camera`**：直接用本地摄像头取景（不读文件），
+A / A+ / B 三路同时跑，同时给滚动窗口与全程历史曲线、会话统计（均值/中位数/标准差/相互偏差）。
+
 > 本目录是独立应用，**不会修改 `../code` 里的任何文件**；
 > 只以只读方式复用 `../code` 的模型、MediaPipe / onnxruntime-web 运行时和 Python 侧车。
 
@@ -74,6 +77,25 @@ A+ 现在只使用 POS：额头优先；只有额头没有可用候选时，才�
 
 这不是更准的测量，而是把“输入变化”和“算法变化”分开。
 
+### 摄像头实时对比
+
+打开 `http://localhost:3200/camera`。
+
+- 用 `getUserMedia` 读本地摄像头，页面自动镜像（自拍视角）；
+- 会话时钟从点「开启摄像头」开始，与视频 currentTime 无关；
+- A/A+ 每秒出一次结果，B 每约 1 秒轮询 `/deep/result`；
+- 四张图：滚动 60s 心率、全程心率、滚动 60s 质量、原始候选 HR；
+- 会话统计：均值 / 中位数 / 最小最大值 / 标准差，以及 A+/A、B/A、B/A+ 的平均绝对差；
+- 可叠加人脸框与额头/脸颊 ROI，并给出运动门控提示；
+- 「导出 JSON」保存本次会话的逐点序列与统计。
+
+浏览器要求：页面必须运行在 `http://localhost` 或 `https`（`localhost` 属于安全上下文），
+否则 `navigator.mediaDevices` 不可用。摄像头画面只在浏览器本地处理，不上传服务器；
+发给本机 Python 侧车的只有 ROI 平均颜色（A/A+）和 JPEG 帧（B）。
+
+注意：摄像头输入没有固定真值，头动、光照变化、自动曝光都会影响结果；
+A/A+ 依赖人脸框取 ROI，B 走整帧深度模型，所以三路不一致是正常现象。
+
 ### 可配置环境变量
 
 ```bash
@@ -104,6 +126,9 @@ test/
     ├── live.js                 实时播放、A/A+/B 采集与图表
     ├── replay.html             确定性重放页
     ├── replay.js               固定帧、固定窗口、复跑验证
+    ├── camera.html             摄像头实时 A / A+ / B 对比页
+    ├── camera.js               摄像头取景、三路采集、历史曲线、统计
+    ├── stat-live.js            会话统计（均值/中位数/偏差）
     └── lib/
         ├── emotion.js          微表情模块（独立）
         ├── vitals.js           生命体征模块（独立）
@@ -125,6 +150,7 @@ test/
 | `/physio/estimate` | 代理到本机 Python 侧车 `../code/physio_service` |
 | `/live` | 实时 A / A+ / B 对比页 |
 | `/replay` | 确定性重放页 |
+| `/camera` | 摄像头实时 A / A+ / B 对比页 |
 | `/aplus/estimate` | 代理到 `aplus_service.py`（A+ 纯信号处理侧车） |
 | `/deep/*` | 代理到 `deep_service.py`（FacePhys.rlap） |
 
@@ -178,5 +204,7 @@ pip install -r ../code/physio_service/requirements.txt
 - 建议视频：10 秒以上、正脸清晰、光照均匀、人脸尽量少晃动（rPPG 对运动敏感）。
 - 两个模块都支持 JSON / CSV 导出。
 - 实时页每次按播放采样，结果天然会有波动；要验证同一视频的算法可重复性，用 `/replay`。
+- 摄像头页需要 `localhost` 或 `https` 才能授权；无摄像头时可用 Chrome 的
+  `--use-fake-device-for-media-stream` 做界面自测。
 - 更详细的算法拆分与模块 API 见 [docs/离线视频分析实验室.md](docs/离线视频分析实验室.md)。
 - A 的六个问题与 A+ 设计见 [docs/方法A的问题与A+改进.md](docs/方法A的问题与A+改进.md)。
