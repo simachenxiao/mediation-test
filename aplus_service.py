@@ -42,28 +42,82 @@ LOW_BAND_HZ = (0.6, 3.5)
 DEFAULT_FS = 30.0
 EPS = 1e-12
 RELIABLE_MIN_CONF = 0.01
+MIN_RELATIVE_RGB_VARIATION = 5e-5
+MIN_FALLBACK_SCORE = 0.05
 
 
 # --------------------------------------------------------------------------- //
 # 数值工具
 # --------------------------------------------------------------------------- //
-def _clean_rgb(rows: Any) -> np.ndarray:
-    out: list[list[float]] = []
-    for row in rows or []:
+def _clean_rgb(rows: Any, expected_len: int | None = None) -> np.ndarray:
+    """Parse RGB rows without destroying their time alignment.
+
+    A ``None`` row is a missing sample, not a reason to move all later
+    samples one position earlier.  Keeping NaNs here lets the caller align
+    the ROI with the timestamp array before interpolating/resampling it.
+    """
+    raw = list(rows) if rows is not None else []
+    n = len(raw) if expected_len is None else max(0, int(expected_len))
+    out = np.full((n, 3), np.nan, dtype=np.float64)
+    for i, row in enumerate(raw[:n]):
         if row is None:
             continue
-        arr = np.asarray(row, dtype=np.float64)
-        if arr.shape != (3,) or not np.isfinite(arr).all():
+        try:
+            arr = np.asarray(row, dtype=np.float64)
+        except (TypeError, ValueError):
             continue
-        out.append(arr.tolist())
-    return np.asarray(out, dtype=np.float64).reshape(-1, 3) if out else np.zeros((0, 3))
+        if arr.shape == (3,) and np.isfinite(arr).all():
+            out[i] = arr
+    return out
 
 
 def _mean_roi(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    if a.size and b.size:
-        n = min(len(a), len(b))
-        return (a[:n] + b[:n]) / 2.0
-    return a if a.size else b
+    if not a.size:
+        return b
+    if not b.size:
+        return a
+    n = min(len(a), len(b))
+    aa, bb = a[:n], b[:n]
+    both = np.isfinite(aa).all(axis=1) & np.isfinite(bb).all(axis=1)
+    out = np.full((n, 3), np.nan, dtype=np.float64)
+    out[both] = (aa[both] + bb[both]) / 2.0
+    only_a = np.isfinite(aa).all(axis=1) & ~both
+    only_b = np.isfinite(bb).all(axis=1) & ~both
+    out[only_a] = aa[only_a]
+    out[only_b] = bb[only_b]
+    return out
+
+
+def _resample_rgb(rgb: np.ndarray, timestamps: np.ndarray, fs: float) -> np.ndarray:
+    """Return an aligned, uniformly sampled ROI or an empty array.
+
+    Internal short gaps are interpolated in time.  Leading/trailing gaps are
+    discarded instead of being forward-filled, which avoids turning a lost
+    face track into a long artificial flat signal.
+    """
+    if rgb.ndim != 2 or rgb.shape[1] != 3 or len(rgb) != len(timestamps):
+        return np.zeros((0, 3), dtype=np.float64)
+    t = np.asarray(timestamps, dtype=np.float64)
+    if len(t) < 2 or not np.isfinite(t).all():
+        return np.zeros((0, 3), dtype=np.float64)
+    valid = np.isfinite(rgb).all(axis=1)
+    if int(valid.sum()) < int(6 * fs):
+        return np.zeros((0, 3), dtype=np.float64)
+    tv = t[valid]
+    if np.any(np.diff(tv) <= 0):
+        return np.zeros((0, 3), dtype=np.float64)
+    span = float(tv[-1] - tv[0])
+    if span < 6.0:
+        return np.zeros((0, 3), dtype=np.float64)
+    count = int(np.floor(span * fs)) + 1
+    if count < int(6 * fs):
+        return np.zeros((0, 3), dtype=np.float64)
+    target = tv[0] + np.arange(count, dtype=np.float64) / fs
+    out = np.column_stack([
+        np.interp(target, tv, rgb[valid, channel])
+        for channel in range(3)
+    ])
+    return out
 
 
 def _temporal_normalize(ch: np.ndarray) -> np.ndarray:
@@ -256,6 +310,15 @@ def _candidate(
 ) -> dict[str, Any] | None:
     if rgb.shape[0] < int(6 * fs):
         return None
+    channel_mean = np.mean(np.abs(rgb), axis=0)
+    relative_variation = float(
+        np.max(np.std(rgb, axis=0) / np.maximum(channel_mean, EPS))
+    )
+    # A flat/near-flat ROI produces an arbitrary Welch bin (usually the
+    # lower band edge).  It is not a usable candidate and must not block
+    # fallback to another ROI.
+    if not np.isfinite(relative_variation) or relative_variation < MIN_RELATIVE_RGB_VARIATION:
+        return None
     pulse = _pos(rgb)
     pulse = _smooth_detrend(pulse, fs, min_freq=detrend_min_freq)
     pulse = _bandpass(pulse, fs, low=band[0], high=band[1])
@@ -275,6 +338,16 @@ def _candidate(
         "sqi": round(sqi, 3),
         "margin": round(margin, 3),
         "score": round(score, 3),
+        # A strong peak sitting on a band boundary is usually leakage or a
+        # drift artefact.  Keep the low-HR guard confidence-aware so a real
+        # 48–52 bpm pulse is not rejected solely because it is near 0.8Hz.
+        "edge": bool(
+            (
+                hr <= band[0] * 60.0 + 4.0
+                and conf >= 0.08
+            )
+            or hr >= band[1] * 60.0 - 4.0
+        ),
     }
 
 
@@ -405,7 +478,8 @@ class Stabilizer:
             if self.smoothed is None:
                 self.smoothed = float(raw)
                 self.last_at = now
-                self.last_good_at = now
+                if reliable:
+                    self.last_good_at = now
                 self.far_since = None
                 return round(self.smoothed, 1), "live", None
 
@@ -417,7 +491,6 @@ class Stabilizer:
                 limited = max(-4.0 * dt, min(4.0 * dt, delta))
                 self.smoothed = self.smoothed + limited * 0.25
                 self.last_at = now
-                self.last_good_at = now
                 self.far_since = None
                 return round(self.smoothed, 1), "live", None
 
@@ -429,7 +502,6 @@ class Stabilizer:
             if delta < 0 and far_for >= 6.0:
                 self.smoothed = float(raw)
                 self.last_at = now
-                self.last_good_at = now
                 self.far_since = None
                 return round(self.smoothed, 1), "live", None
             held = round(now - self.last_good_at, 1) if self.last_good_at else None
@@ -495,26 +567,25 @@ class AplusSession:
 
         try:
             t = np.asarray(timestamps, dtype=np.float64)
+            if t.ndim != 1 or len(t) != n or not np.isfinite(t).all() or np.any(np.diff(t) <= 0):
+                raise ValueError("timestamps must be finite and strictly increasing")
         except Exception:
             t = np.arange(n, dtype=np.float64) / fs
         span = float(t[-1] - t[0]) if t.size >= 2 else 0.0
 
-        forehead = _clean_rgb(payload.get("forehead"))
-        left = _clean_rgb(payload.get("left_cheek"))
-        right = _clean_rgb(payload.get("right_cheek"))
+        forehead = _clean_rgb(payload.get("forehead"), n)
+        left = _clean_rgb(payload.get("left_cheek"), n)
+        right = _clean_rgb(payload.get("right_cheek"), n)
         cheeks = _mean_roi(left, right)
 
-        # 额头优先：只有额头没有可用候选时，才回退到脸颊。
+        # 额头优先：额头没有候选或信号太弱时，才回退到脸颊。
         # 不把 forehead / cheeks 同时放进候选池，避免跨 ROI 伪共识。
         def prepare(rgb: np.ndarray) -> np.ndarray:
-            if rgb.shape[0] != n:
-                m = min(rgb.shape[0], n)
-                return rgb[:m]
-            return rgb
+            return _resample_rgb(rgb, t, fs)
 
         active_roi = "forehead"
         candidates = _roi_candidates(prepare(forehead), fs, "forehead")
-        if not candidates and cheeks.shape[0] >= int(6 * fs):
+        if not candidates or max(float(c["score"]) for c in candidates) < MIN_FALLBACK_SCORE:
             active_roi = "cheeks"
             candidates = _roi_candidates(prepare(cheeks), fs, "cheeks")
 
@@ -537,7 +608,10 @@ class AplusSession:
         quality = float(np.clip(base_quality, 0.0, 1.0))
 
         # 单 ROI 用频谱置信度 + 质量门控；运动门控尚未接入。
-        edge = bool(abs(raw_hr - float(primary["bandLow"]) * 60.0) <= 4.0)
+        # A cluster can contain candidates from both bands.  Using the
+        # cluster's minimum bandLow hides an edge peak from the 0.8Hz band;
+        # retain the candidate-level edge flag instead.
+        edge = bool(any(bool(c.get("edge")) for c in members))
         reliable = bool(
             not edge
             and near_conf >= RELIABLE_MIN_CONF
