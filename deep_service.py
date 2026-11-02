@@ -2,8 +2,8 @@
 """FacePhys.rlap 心率侧车（仅 test 使用）。
 
 为实时 A/B 对比提供 B 引擎：
-  * 从 ../EmotiEffLib-main/rppg-demo/rppg-demo 的 vendor 中加载 Open-rppg 的
-    FacePhys.rlap，模型输入 36x36、30fps、逐帧输出 BVP。
+  * 从本目录 vendor/open_rppg 中加载 Open-rppg 的 FacePhys.rlap，
+    模型输入 36x36、30fps、逐帧输出 BVP。
   * HTTP 接口由 test/server.mjs 代理，浏览器只和 Node 同源通信。
 
 模型加载需要 30~40 秒，因此 /start 立即返回，/health 轮询加载状态。
@@ -26,14 +26,14 @@ os.environ.setdefault("KERAS_BACKEND", "jax")
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 
 ROOT = Path(__file__).resolve().parent
-DEMO = ROOT.parent / "EmotiEffLib-main" / "rppg-demo" / "rppg-demo"
-VENDOR = DEMO / "vendor" / "open_rppg"
+VENDOR = ROOT / "vendor" / "open_rppg"
+VITAL = ROOT / "vendor"
 
 if str(VENDOR) not in sys.path:
     sys.path.insert(0, str(VENDOR))
-# 复用 rppg-demo 的呼吸/HRV 估计器；只读导入，不修改该目录。
-if str(DEMO) not in sys.path:
-    sys.path.insert(0, str(DEMO))
+# 使用本目录 vendor/vital_signs 中的呼吸/HRV 估计器。
+if str(VITAL) not in sys.path:
+    sys.path.insert(0, str(VITAL))
 
 import numpy as np  # noqa: E402
 from vital_signs.hrv_respiration import HrvRespirationEstimator  # noqa: E402
@@ -423,7 +423,7 @@ def main() -> None:
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     port = httpd.server_address[1]
     print(f"DEEP_PORT={port}", flush=True)
-    print(f"[deep] model={MODEL_NAME} demo={DEMO}", flush=True)
+    print(f"[deep] model={MODEL_NAME} vendor={VENDOR}", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

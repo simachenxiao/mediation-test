@@ -2,13 +2,13 @@
 //
 // 功能：
 //   * 提供 test/public 下的页面（微表情 + 生命体征离线分析）
-//   * 以只读方式复用 ../code 里的 MediaPipe / onnxruntime-web / 模型文件
-//   * 拉起 ../code/physio_service 的 Python 侧车，并代理 /physio/estimate
+//   * 使用本目录 vendor/ 里内置的 MediaPipe / onnxruntime-web / 模型文件
+//   * 拉起本地 physio_service 的 Python 侧车，并代理 /physio/estimate
 //   * 拉起本地 deep_service.py（Open-rppg FacePhys.rlap），供实时 B 引擎使用
 //   * 拉起本地 aplus_service.py（POS + 额头优先 + Welch + SQI），供实时 A+ 对比
 //   * 摄像头页 /camera：本地摄像头输入，A / A+ / B 三路结果与历史曲线
 //
-// 不会写入或修改 ../code 里的任何文件。
+// 整个应用不读取 ../code 或 ../EmotiEffLib-main。
 //
 // 启动：node server.mjs    （或 npm start）
 // 环境变量：PORT（默认 3200）、HOST（默认 0.0.0.0）、PHYSIO_PYTHON、DEEP_PYTHON、APLUS_PYTHON、DEEP_FACE_MODE
@@ -20,16 +20,23 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const CODE = path.resolve(ROOT, '..', 'code');
 const PUBLIC = path.join(ROOT, 'public');
-const NODE_MODULES = path.join(CODE, 'node_modules');
+const VENDOR = path.join(ROOT, 'vendor');
+const MEDIAPIPE_DIR = path.join(VENDOR, 'mediapipe');
+const ORT_DIR = path.join(VENDOR, 'ort');
+const MODELS_DIR = path.join(VENDOR, 'models');
+const PHYSIO_DIR = path.join(ROOT, 'physio_service');
 
-// 只读依赖检查：缺东西时给出明确提示，而不是 500
+// 本地依赖检查：缺东西时给出明确提示，而不是 500
 const REQUIRED = [
-  path.join(NODE_MODULES, '@mediapipe/tasks-vision'),
-  path.join(NODE_MODULES, 'onnxruntime-web/dist'),
-  path.join(CODE, 'models'),
-  path.join(CODE, 'physio_service'),
+  path.join(MEDIAPIPE_DIR, 'vision_bundle.mjs'),
+  path.join(MEDIAPIPE_DIR, 'wasm'),
+  path.join(ORT_DIR, 'ort.webgpu.bundle.min.mjs'),
+  path.join(MODELS_DIR, 'affectnet_emotions', 'onnx', 'enet_b0_8_best_vgaf.onnx'),
+  path.join(MODELS_DIR, 'blaze_face_short_range.tflite'),
+  path.join(PHYSIO_DIR, 'server.py'),
+  path.join(VENDOR, 'open_rppg', 'rppg', 'main.py'),
+  path.join(VENDOR, 'vital_signs', 'hrv_respiration.py'),
   path.join(ROOT, 'models', 'blaze_face_full_range.tflite'),
 ];
 
@@ -90,11 +97,11 @@ function stopPhysio() {
 function launchPhysio() {
   const py =
     process.env.PHYSIO_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
-  physio.command = { cmd: py, args: ['-m', 'physio_service.server'], cwd: CODE };
+  physio.command = { cmd: py, args: ['-m', 'physio_service.server'], cwd: ROOT };
   physio.lastError = null;
   physio.lastExit = null;
   physio.port = null;
-  sidecarLog(`启动: ${py} -m physio_service.server (cwd=${CODE})`);
+  sidecarLog(`启动: ${py} -m physio_service.server (cwd=${ROOT})`);
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -115,7 +122,7 @@ function launchPhysio() {
     let child;
     try {
       child = spawn(py, ['-m', 'physio_service.server'], {
-        cwd: CODE,
+        cwd: ROOT,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env },
         windowsHide: true,
@@ -554,14 +561,14 @@ function readBody(req, limit = 8 * 1024 * 1024) {
   });
 }
 
-// 静态目录映射：/mediapipe /wasm /ort /models 都只读指向 ../code
+// 静态目录映射：/mediapipe /wasm /ort /models 都指向本目录 vendor/
 const MOUNTS = [
-  // test/models 只放本目录自带的模型（如 full-range 人脸检测），不改 ../code
+  // test/models 只放本目录自带的模型（如 full-range 人脸检测）
   { prefix: '/local-models/', dir: path.join(ROOT, 'models'), cache: 'public, max-age=86400' },
-  { prefix: '/mediapipe/', dir: path.join(NODE_MODULES, '@mediapipe/tasks-vision'), cache: 'public, max-age=86400' },
-  { prefix: '/wasm/', dir: path.join(NODE_MODULES, '@mediapipe/tasks-vision/wasm'), cache: 'public, max-age=86400' },
-  { prefix: '/ort/', dir: path.join(NODE_MODULES, 'onnxruntime-web/dist'), cache: 'public, max-age=86400' },
-  { prefix: '/models/', dir: path.join(CODE, 'models'), cache: 'public, max-age=86400' },
+  { prefix: '/mediapipe/', dir: MEDIAPIPE_DIR, cache: 'public, max-age=86400' },
+  { prefix: '/wasm/', dir: path.join(MEDIAPIPE_DIR, 'wasm'), cache: 'public, max-age=86400' },
+  { prefix: '/ort/', dir: ORT_DIR, cache: 'public, max-age=86400' },
+  { prefix: '/models/', dir: MODELS_DIR, cache: 'public, max-age=86400' },
 ];
 
 async function handle(req, res) {
@@ -570,7 +577,7 @@ async function handle(req, res) {
 
   // ---- API ----
   if (pathname === '/health') {
-    return sendJson(res, 200, { status: 'ok', mode: 'standalone-lab', codeDir: CODE });
+    return sendJson(res, 200, { status: 'ok', mode: 'standalone-lab', rootDir: ROOT, vendorDir: VENDOR });
   }
 
   if (pathname === '/physio/health') {
@@ -789,7 +796,7 @@ async function handle(req, res) {
       : sendJson(res, 404, { error: 'camera.html not found' });
   }
 
-  // ---- 只读依赖 ----
+  // ---- 本地依赖 ----
   for (const m of MOUNTS) {
     if (pathname.startsWith(m.prefix)) {
       const rel = pathname.slice(m.prefix.length);
@@ -811,9 +818,9 @@ async function handle(req, res) {
 // --------------------------------------------------------------------------- //
 const missing = REQUIRED.filter((p) => !fs.existsSync(p));
 if (missing.length) {
-  console.error('\n缺少只读依赖，请确认以下路径存在：');
+  console.error('\n缺少本地依赖，请确认以下路径存在：');
   for (const p of missing) console.error('  - ' + p);
-  console.error('\n本目录只读取 ../code，不会修改它。\n');
+  console.error('\n这些依赖应当位于 test/vendor/ 或 test/physio_service/。\n');
   process.exit(1);
 }
 
@@ -834,7 +841,8 @@ server.listen(PORT, HOST, () => {
   console.log(`确定性重放: http://localhost:${PORT}/replay`);
   console.log(`摄像头三路对比: http://localhost:${PORT}/camera`);
   console.log(`   页面目录: ${PUBLIC}`);
-  console.log(`   只读依赖: ${CODE}`);
+  console.log(`   本地依赖: ${VENDOR}`);
+  console.log(`   生理服务: ${PHYSIO_DIR}`);
   ensurePhysio().catch((err) => console.error('[physio] 预启动失败:', err.message));
   ensureAplus().catch((err) => console.error('[aplus] 预启动失败:', err.message));
 });

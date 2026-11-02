@@ -1,0 +1,41 @@
+{
+  "algorithm": "pos",
+  "min_frames": 60,
+
+  "person": {
+    "name": "张某某",
+    "age": 31,
+    "gender": "男",
+    "caseId": "A-2025-0915"
+  },
+
+  "heart_rate": {
+    "band_hz": [0.7, 4.0],
+    "order": 4
+  },
+  "respiratory_rate": {
+    "band_hz": [0.1, 0.5],
+    "order": 4
+  },
+  "spo2": {
+    "a": 100.0,
+    "b": 5.0
+  },
+  "blood_pressure": {
+    "sbp_bias": 110.0,
+    "sbp_ptt": -0.8,
+    "sbp_hr": 0.15,
+    "sbp_pir": 6.0,
+    "sbp_aix": 0.5,
+    "dbp_bias": 70.0,
+    "dbp_ptt": -0.4,
+    "dbp_hr": 0.05,
+    "dbp_pir": 3.0,
+    "dbp_aix": 0.2
+  },
+  "hrv": {
+    "vlf": [0.0033, 0.04],
+    "lf": [0.04, 0.15],
+    "hf": [0.15, 0.40]
+  }
+}

@@ -1,0 +1,4 @@
+# physio_service 运行时依赖（仅 numpy + scipy，无 NPU / OpenCV / FastAPI）
+# 注意：numpy 必须 < 2 以与 rppg 保持一致（虽然是纯 CPU 计算，仍保持版本对齐）。
+numpy>=1.24,<2
+scipy>=1.10

@@ -6,7 +6,7 @@
 import { FaceDetector, FilesetResolver } from '/mediapipe/vision_bundle.mjs';
 
 // full-range 版专为更小/更远的人脸设计；short-range 版在 128×128 输入下
-// 人脸低于画面高度约 20% 就会漏检。full 模型放在 test/models，不修改 ../code。
+// 人脸低于画面高度约 20% 就会漏检。full 模型放在 test/models。
 export const FACE_MODELS = {
   full: {
     id: 'full',

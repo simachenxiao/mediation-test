@@ -13,8 +13,9 @@ A+（POS + Welch + SQI，额头优先）和 B（FacePhys.rlap）边播边出结�
 以及一个**摄像头实时页 `/camera`**：直接用本地摄像头取景（不读文件），
 A / A+ / B 三路同时跑，同时给滚动窗口与全程历史曲线、会话统计（均值/中位数/标准差/相互偏差）。
 
-> 本目录是独立应用，**不会修改 `../code` 里的任何文件**；
-> 只以只读方式复用 `../code` 的模型、MediaPipe / onnxruntime-web 运行时和 Python 侧车。
+> 本目录是**完全独立应用**：MediaPipe / onnxruntime-web / 模型 / Physio 侧车
+> 都在本目录的 `vendor/` 和 `physio_service/` 里，不再读取 `../code`
+> 或 `../EmotiEffLib-main`。
 
 ---
 
@@ -31,16 +32,18 @@ npm start
 
 前置条件：
 
-1. `../code` 目录存在，且包含：
-   - `node_modules/@mediapipe/tasks-vision`
-   - `node_modules/onnxruntime-web/dist`
-   - `models/`（BlazeFace + 情绪 ONNX）
-   - `test/models/blaze_face_full_range.tflite`（本仓库自带，用于更小的人脸）
+1. 本目录已经内置：
+   - `vendor/mediapipe/`（MediaPipe tasks-vision）
+   - `vendor/ort/`（onnxruntime-web 的 WebGPU / WASM 文件）
+   - `vendor/models/`（BlazeFace short + 情绪 ONNX）
+   - `vendor/open_rppg/`（FacePhys.rlap）
+   - `vendor/vital_signs/`（B 的 HRV/呼吸估计）
+   - `models/blaze_face_full_range.tflite`
    - `physio_service/`（rPPG Python 侧车）
 2. 生命体征需要 Python 依赖：
 
 ```bash
-pip install -r ../code/physio_service/requirements.txt
+pip install -r physio_service/requirements.txt
 ```
 
 微表情不依赖 Python；Python 没装时生命体征会提示侧车未启动，其余功能正常。
@@ -54,16 +57,16 @@ pip install -r ../code/physio_service/requirements.txt
 URL ：/local-models/blaze_face_full_range.tflite
 ```
 
-上一个版本用的是 `../code/models/blaze_face_short_range.tflite`（128×128 输入）。
+上一个版本用的是 `vendor/models/blaze_face_short_range.tflite`（128×128 输入）。
 实测在 1280×720 画面里，人脸低于画面高度约 20% 就会漏检；
 换成 full-range 后，约 7%（50px 高）仍能稳定检出，实测 40px 左右才失败。
 
-模型文件随本仓库提交，不修改 `../code`。
+模型文件随本仓库提交，不再依赖 `../code`。
 
 `/camera` 页面的「人脸模型」下拉框可以在运行中切换：
 
 - Full Range（小脸）：默认，覆盖更远；
-- Short Range（原版）：`../code/models/blaze_face_short_range.tflite`。
+- Short Range（原版）：`vendor/models/blaze_face_short_range.tflite`。
 
 页面会按模型分别累计检测次数、命中率和中位耗时，切换后可以直接对比。
 驱动逻辑在 `public/lib/face-detect.js` 的 `FACE_MODELS` / `getFaceDetector(modelId)`；
@@ -73,14 +76,14 @@ URL ：/local-models/blaze_face_full_range.tflite
 
 打开 `http://localhost:3200/live`，需要额外准备：
 
-- `../EmotiEffLib-main/rppg-demo/rppg-demo/vendor/open_rppg`（FacePhys.rlap 权重与代码）
+- `vendor/open_rppg/`（FacePhys.rlap 权重与代码，本目录已内置）
 - Python 侧已安装 `jax`、`keras`、`onnxruntime`、`opencv-python`、`heartpy`
 
 ```bash
 pip install "jax" "keras>=3" onnxruntime opencv-python heartpy
 ```
 
-B 模型首次加载约 **20–40 秒**，页面会显示加载状态；加载完成后才能开始实时分析。
+B 模型首次加载约 **20–90 秒**（首次 JAX 编译可能更久），页面会显示加载状态；加载完成后才能开始实时分析。
 A/A+/B 都使用 30 秒滑动窗口，视频播放期间会禁用进度条拖动。
 
 A+ 是纯 NumPy/SciPy 侧车，不需要额外模型或新依赖；如果生命体征依赖已安装，A+ 就能启动。A+ 从约 12 秒开始，之后每约 1 秒更新一次；A 从约 8 秒开始，之后也每约 1 秒更新。
@@ -94,7 +97,7 @@ A 的 `/physio/estimate` 同时返回呼吸率（RR）和 RR 置信度：
 `/live` 和 `/camera` 的 A 卡片会显示「呼吸 RR / RR 置信度」，
 `/camera` 还会画出 RR 曲线。呼吸率来自 A 的 forehead 原始绿色通道。
 
-B 的呼吸率来自 rppg-demo 的 `HrvRespirationEstimator`：先读 HRV 的
+B 的呼吸率来自本目录 `vendor/vital_signs` 的 `HrvRespirationEstimator`：先读 HRV 的
 `breathingrate`，没有就从 BVP 原始信号做 0.08–0.5Hz 带通 + Welch。
 `/live` 和 `/camera` 的 B 卡片会显示「B 呼吸 RR / RR 来源」，来源分为
 `HRV 派生`、`BVP 派生`、`保持`。B 的 RR 是实验性输出，不等于医学呼吸监测。
@@ -107,7 +110,7 @@ B 的人脸检测是 open_rppg **内部**的 BlazeFace ONNX（默认 `blaze_face
 
 ### B 的心率/呼吸实现与 rppg-demo 的关系
 
-B 与 `../EmotiEffLib-main/rppg-demo` 的 HR 核心逻辑一致：
+B 与参考实现 rppg-demo 的 HR 核心逻辑一致：
 
 - 都用 `Model.hr(start=-30, return_hrv=False)` 取 `hr` 和 `SQI`；
 - 都用同一套 `HeartRateStabilizer`（35–190bpm 范围、SQI<0.2 预热、
@@ -119,8 +122,8 @@ B 与 `../EmotiEffLib-main/rppg-demo` 的 HR 核心逻辑一致：
 - rppg-demo 还计算 HRV、BP、SpO2 和 BVP 波形，B 只暴露 HR/RR/人脸；
 - rppg-demo 的 HR 窗口可通过 `hrWindow` 配，B 固定 30s；
 - B 的 `face_mode` 现在是 `Far`（192px），rppg-demo 默认是 `Near`（128px）；
-- B 通过只读导入复用 rppg-demo 的 `HrvRespirationEstimator` 来产出 RR，
-  不修改 `rppg-demo` 目录。
+- B 使用本目录 `vendor/vital_signs` 的 `HrvRespirationEstimator` 来产出 RR；
+  该实现来自 rppg-demo，但已经内置到本目录。
 
 B 的 RR 用 45s 窗口，优先 HRV 的 `breathingrate`，失败时从 `model.bvp(raw=True)`
 做 0.08–0.5Hz 带通 + Welch；因此 B 的 RR 与 A 的额头绿色通道 RR 不是同一条信号。
@@ -187,6 +190,13 @@ test/
 ├── README.md                   本文件
 ├── models/
 │   └── blaze_face_full_range.tflite  full-range 人脸检测模型
+├── vendor/
+│   ├── mediapipe/              MediaPipe tasks-vision
+│   ├── ort/                    onnxruntime-web 浏览器运行时
+│   ├── models/                 情绪 ONNX + BlazeFace short
+│   ├── open_rppg/              FacePhys.rlap + B 内部人脸模型
+│   └── vital_signs/            B 的 HRV/呼吸估计
+├── physio_service/             A 的 rPPG Python 侧车
 ├── docs/
 │   ├── 离线视频分析实验室.md    详细说明 / 模块 API
 │   └── 方法A的问题与A+改进.md   A 的问题、A+ 设计、确定性重放
@@ -210,16 +220,16 @@ test/
         └── charts.js           canvas 图表
 ```
 
-运行时路径映射（只读）：
+运行时路径映射（全部在本目录内）：
 
 | URL | 实际目录 |
 |-----|----------|
-| `/mediapipe/*` | `../code/node_modules/@mediapipe/tasks-vision/*` |
-| `/wasm/*` | `../code/node_modules/@mediapipe/tasks-vision/wasm/*` |
-| `/ort/*` | `../code/node_modules/onnxruntime-web/dist/*` |
-| `/models/*` | `../code/models/*` |
-| `/local-models/*` | `test/models/*` |
-| `/physio/estimate` | 代理到本机 Python 侧车 `../code/physio_service` |
+| `/mediapipe/*` | `vendor/mediapipe/*` |
+| `/wasm/*` | `vendor/mediapipe/wasm/*` |
+| `/ort/*` | `vendor/ort/*` |
+| `/models/*` | `vendor/models/*` |
+| `/local-models/*` | `models/*` |
+| `/physio/estimate` | 代理到本机 Python 侧车 `physio_service/` |
 | `/live` | 实时 A / A+ / B 对比页 |
 | `/replay` | 确定性重放页 |
 | `/camera` | 摄像头实时 A / A+ / B 对比页 |
@@ -265,7 +275,7 @@ curl http://localhost:3200/physio/health
 如果报缺少 `numpy` / `scipy`，执行：
 
 ```bash
-pip install -r ../code/physio_service/requirements.txt
+pip install -r physio_service/requirements.txt
 ```
 
 ---

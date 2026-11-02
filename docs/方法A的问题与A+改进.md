@@ -2,7 +2,7 @@
 
 位置：`D:/产品/微表情识别/test`
 
-本文记录 A（POS + FFT）当前的实现问题，以及 A+ 如何在不修改 `../code` 的前提下，
+本文记录 A（POS + FFT）当前的实现问题，以及 A+ 如何在不修改原 A 服务的前提下，
 借鉴 B 的后处理思路做增强。A+ 不是深度学习模型，也不替代 B；它是在 A 的同一份 ROI 采样上，
 用更稳的信号处理得到第二组结果。
 
@@ -20,7 +20,7 @@
 → YCbCr 肤色过滤 + 平均 RGB
 → 30 秒滑动窗口，重采样到 30Hz
 → POST /physio/estimate
-→ code/physio_service
+→ physio_service
    → POS 提取脉搏波
    → 线性去趋势
    → 0.7–4.0Hz 4 阶 Butterworth 带通
@@ -117,7 +117,7 @@ A+ 只借鉴 B 的**后处理和质量控制**，不引入 FacePhys 模型：
 8. 心率稳定器：限速 + EMA + 低质量保持
 9. 同时返回 `rawHr` 和 `hr`，页面可对照
 
-A+ 不修改 `../code/physio_service`，而是新增：
+A+ 不修改 A 的 `physio_service`，而是新增：
 
 ```
 test/aplus_service.py
@@ -755,7 +755,7 @@ deep_service.py    # Stabilizer.update(..., now=replayTime)；POST /result 支�
 server.mjs         # /replay 路由；/deep/result POST 代理
 ```
 
-`../code` 未修改。
+`test/` 现在自带 `physio_service/` 与 `vendor/`，不再依赖 `../code`。
 
 
 ---
