@@ -11,7 +11,7 @@
 //   A+：复用 A 的采样 payload → /aplus/estimate（POS + Welch + SQI）
 //   B ：画布 JPEG 帧 → /deep/frame → deep_service.py（FacePhys.rlap）→ /deep/result
 
-import { getFaceDetector, detectFaces, largestFace, clampBox } from '/lib/face-detect.js';
+import { getFaceDetector, detectFaces, largestFace, clampBox, FACE_MODELS, DEFAULT_FACE_MODEL } from '/lib/face-detect.js';
 import { LivePhysioA } from '/lib/physio-live.js';
 import { roiRects } from '/lib/roi.js';
 import { drawLineChart } from '/lib/charts.js';
@@ -49,6 +49,11 @@ const els = {
   runB: $('runB'),
   showRoi: $('showRoi'),
   camSelect: $('camSelect'),
+  faceModel: $('faceModel'),
+  faceModelNote: $('faceModelNote'),
+  metaModel: $('metaModel'),
+  modelRows: $('modelRows'),
+  modelNote: $('modelNote'),
   fpsCap: $('fpsCap'),
   status: $('status'),
   log: $('log'),
@@ -97,6 +102,12 @@ const state = {
   frames: 0,
   fps: 0,
   detector: null,
+  detectorToken: 0,
+  faceModel: DEFAULT_FACE_MODEL,
+  modelStats: {
+    full: { tries: 0, hits: 0, totalMs: 0, latencies: [] },
+    short: { tries: 0, hits: 0, totalMs: 0, latencies: [] },
+  },
   box: null,
   boxAt: -Infinity,
   detecting: false,
@@ -133,8 +144,6 @@ const state = {
   aRaw: [],
   aplusRaw: [],
   bRaw: [],
-  faceHits: 0,
-  faceTries: 0,
 };
 
 // --------------------------------------------------------------------------- //
@@ -407,12 +416,15 @@ function onFrame() {
   if (state.detector && !state.detecting && now - state.lastDetectAt >= DETECT_INTERVAL_SEC) {
     state.lastDetectAt = now;
     state.detecting = true;
+    const modelId = state.faceModel;
+    const token = state.detectorToken;
+    const t0 = performance.now();
     detectFaces(state.detector, v)
       .then((dets) => {
+        if (token !== state.detectorToken) return;
         const hit = largestFace(dets);
-        state.faceTries++;
+        recordModelStat(modelId, !!hit, performance.now() - t0);
         if (hit) {
-          state.faceHits++;
           const prev = state.box;
           const box = clampBox(hit.box, v.videoWidth, v.videoHeight);
           updateMotion(prev, box, now);
@@ -422,7 +434,7 @@ function onFrame() {
       })
       .catch((err) => log(`人脸检测失败：${err.message}`))
       .finally(() => {
-        state.detecting = false;
+        if (token === state.detectorToken) state.detecting = false;
       });
   }
 
@@ -462,6 +474,19 @@ function updateFps(now) {
   while (state.fpsHistory.length > 2 && now - state.fpsHistory[0] > 2) state.fpsHistory.shift();
   const span = now - state.fpsHistory[0];
   state.fps = span > 0.2 ? (state.fpsHistory.length - 1) / span : 0;
+}
+
+function recordModelStat(modelId, hit, ms) {
+  const stat = state.modelStats[modelId];
+  if (!stat) return;
+  stat.tries++;
+  if (hit) stat.hits++;
+  if (Number.isFinite(ms)) {
+    stat.totalMs += ms;
+    if (!stat.latencies) stat.latencies = [];
+    stat.latencies.push(ms);
+    if (stat.latencies.length > 500) stat.latencies.shift();
+  }
 }
 
 function updateMotion(prev, next, now) {
@@ -685,9 +710,13 @@ function updateUI() {
     els.metaElapsed.textContent = `${state.elapsed.toFixed(1)}s`;
   }
   els.badgeFps.textContent = `${state.fps.toFixed(1)} fps`;
-  const hitRate = state.faceTries ? state.faceHits / state.faceTries : NaN;
+  const curStat = state.modelStats[state.faceModel] || { tries: 0, hits: 0, totalMs: 0 };
+  const hitRate = curStat.tries ? curStat.hits / curStat.tries : NaN;
+  els.metaModel.textContent = FACE_MODELS[state.faceModel]?.label || state.faceModel;
+  els.faceModelNote.textContent = state.faceModel === 'full' ? '小脸优先 · 覆盖更远' : '原版 · 128×128 输入';
+  const facePct = state.box && els.video.videoHeight ? (state.box.height / els.video.videoHeight) * 100 : NaN;
   els.badgeFace.textContent = state.box
-    ? `人脸命中 ${pct(hitRate)}`
+    ? `人脸命中 ${pct(hitRate)} · 高 ${pct(facePct / 100)}`
     : state.detector
       ? '未检测到人脸'
       : '检测器未加载';
@@ -785,6 +814,7 @@ function updateUI() {
   }
 
   updateWarn();
+  updateModelTable();
   updateStats();
   drawCharts();
 }
@@ -803,6 +833,23 @@ function updateWarn() {
   } else {
     els.warnbar.classList.remove('show');
   }
+}
+
+function updateModelTable() {
+  if (!els.modelRows) return;
+  const rows = ['full', 'short'].map((id) => {
+    const m = FACE_MODELS[id];
+    const st = state.modelStats[id] || { tries: 0, hits: 0, totalMs: 0, latencies: [] };
+    const rate = st.tries ? `${Math.round((st.hits / st.tries) * 100)}%` : '—';
+    // 跳过每个模型前 3 次（模型 warmup / 首帧），用中位数避免被冷启动拉高。
+    const samples = (st.latencies || []).slice(3).sort((a, b) => a - b);
+    const med = samples.length ? samples[Math.floor(samples.length / 2)] : NaN;
+    const latency = Number.isFinite(med) ? `${med.toFixed(1)}ms` : '—';
+    const active = id === state.faceModel ? ' style="color:var(--ink)"' : '';
+    return `<tr${active}><td>${m.label}</td><td class="mono">${st.tries}</td><td class="mono">${st.hits}</td><td class="mono">${rate}</td><td class="mono">${latency}</td></tr>`;
+  }).join('');
+  els.modelRows.innerHTML = rows;
+  els.modelNote.textContent = `${FACE_MODELS[state.faceModel]?.label || state.faceModel} · 运行中可切换`;
 }
 
 function statsCell(s, fmt) {
@@ -913,6 +960,41 @@ function drawCharts() {
 }
 
 // --------------------------------------------------------------------------- //
+// 模型切换
+// --------------------------------------------------------------------------- //
+async function switchFaceModel(next) {
+  if (!FACE_MODELS[next] || next === state.faceModel) return;
+  state.faceModel = next;
+  state.detector = null;
+  state.detectorToken++;
+  state.box = null;
+  state.boxAt = -Infinity;
+  state.lastDetectAt = -Infinity;
+  state.detecting = false;
+  const label = FACE_MODELS[next].label;
+  els.faceModel.value = next;
+  els.metaModel.textContent = label;
+  log(`切换人脸检测模型：${label}`);
+  updateModelTable();
+
+  if (!state.running) {
+    updateUI();
+    return;
+  }
+  setStatus(`正在加载人脸模型：${label}…`);
+  try {
+    const det = await getFaceDetector(next);
+    if (!state.running || state.faceModel !== next) return;
+    state.detector = det;
+    setStatus(`已切换到 ${label}，正在重新检测人脸。`);
+  } catch (err) {
+    setStatus(`人脸模型切换失败：${err.message}`);
+    log(`人脸模型切换失败：${err.message}`);
+  }
+  updateUI();
+}
+
+// --------------------------------------------------------------------------- //
 // 启停
 // --------------------------------------------------------------------------- //
 async function start() {
@@ -945,8 +1027,12 @@ async function start() {
 
 async function startAnalysis() {
   setStatus('加载人脸检测器…');
+  const modelId = state.faceModel;
+  const token = ++state.detectorToken;
   try {
-    state.detector = await getFaceDetector();
+    const det = await getFaceDetector(modelId);
+    if (token !== state.detectorToken || state.faceModel !== modelId) return;
+    state.detector = det;
   } catch (err) {
     setStatus(`人脸检测器加载失败：${err.message}`);
     log(`人脸检测器加载失败：${err.message}`);
@@ -958,8 +1044,10 @@ async function startAnalysis() {
   state.elapsed = 0;
   state.frames = 0;
   state.fpsHistory = [];
-  state.faceHits = 0;
-  state.faceTries = 0;
+  state.modelStats = {
+    full: { tries: 0, hits: 0, totalMs: 0, latencies: [] },
+    short: { tries: 0, hits: 0, totalMs: 0, latencies: [] },
+  };
   state.box = null;
   state.boxAt = -Infinity;
   state.lastDetectAt = -Infinity;
@@ -1015,6 +1103,10 @@ function clearHistory() {
   state.aRaw = [];
   state.aplusRaw = [];
   state.bRaw = [];
+  state.modelStats = {
+    full: { tries: 0, hits: 0, totalMs: 0, latencies: [] },
+    short: { tries: 0, hits: 0, totalMs: 0, latencies: [] },
+  };
   state.a.reset();
   updateUI();
   log('已清空历史曲线。');
@@ -1037,6 +1129,7 @@ function exportJson() {
       bSqi: state.bQ,
       aplusRaw: state.aplusRaw,
       bRaw: state.bRaw,
+      faceModels: state.modelStats,
     },
     stats: {
       a: summarizeSeries(state.aSeries),
@@ -1070,6 +1163,8 @@ els.runB.addEventListener('change', async () => {
   if (els.runB.checked && !state.deep.ready && !state.deep.error) await requestDeepStart();
   if (state.running && els.runB.checked && state.deep.ready) await resetDeep();
 });
+
+els.faceModel.addEventListener('change', () => switchFaceModel(els.faceModel.value));
 
 els.camSelect.addEventListener('change', async () => {
   if (state.running) return;

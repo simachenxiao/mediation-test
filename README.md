@@ -58,8 +58,16 @@ URL ：/local-models/blaze_face_full_range.tflite
 实测在 1280×720 画面里，人脸低于画面高度约 20% 就会漏检；
 换成 full-range 后，约 7%（50px 高）仍能稳定检出，实测 40px 左右才失败。
 
-模型文件随本仓库提交，不修改 `../code`。如果换了模型或想对比，改
-`public/lib/face-detect.js` 里的 `MODEL_PATH` 即可。
+模型文件随本仓库提交，不修改 `../code`。
+
+`/camera` 页面的「人脸模型」下拉框可以在运行中切换：
+
+- Full Range（小脸）：默认，覆盖更远；
+- Short Range（原版）：`../code/models/blaze_face_short_range.tflite`。
+
+页面会按模型分别累计检测次数、命中率和中位耗时，切换后可以直接对比。
+驱动逻辑在 `public/lib/face-detect.js` 的 `FACE_MODELS` / `getFaceDetector(modelId)`；
+其他页面默认使用 Full Range。
 
 ### 实时 A / A+ / B 对比（B 引擎）
 
@@ -104,7 +112,8 @@ A+ 现在只使用 POS：额头优先；只有额头没有可用候选时，才�
 - 四张图：滚动 60s 心率、全程心率、滚动 60s 质量、原始候选 HR；
 - 会话统计：均值 / 中位数 / 最小最大值 / 标准差，以及 A+/A、B/A、B/A+ 的平均绝对差；
 - 可叠加人脸框与额头/脸颊 ROI，并给出运动门控提示；
-- 「导出 JSON」保存本次会话的逐点序列与统计。
+- 可运行中切换人脸模型（Full Range / Short Range），并按模型累计命中率与中位耗时；
+- 「导出 JSON」保存本次会话的逐点序列、统计与人脸模型统计。
 
 浏览器要求：页面必须运行在 `http://localhost` 或 `https`（`localhost` 属于安全上下文），
 否则 `navigator.mediaDevices` 不可用。摄像头画面只在浏览器本地处理，不上传服务器；

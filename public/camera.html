@@ -162,6 +162,7 @@
         <dl class="kv" id="meta">
           <dt>设备</dt><dd id="metaDevice">—</dd>
           <dt>分辨率</dt><dd id="metaSize">—</dd>
+          <dt>检测模型</dt><dd id="metaModel">Full Range（小脸）</dd>
           <dt>分析时长</dt><dd id="metaElapsed">0.0s</dd>
         </dl>
 
@@ -182,6 +183,15 @@
           <select id="camSelect"><option value="">默认设备</option></select>
           <label class="check">采样帧率</label>
           <input type="number" id="fpsCap" min="5" max="30" step="1" value="15" />
+        </div>
+
+        <div class="actions" style="align-items:center">
+          <label class="check">人脸模型</label>
+          <select id="faceModel" title="运行中可切换，统计按模型分别累计">
+            <option value="full" selected>Full Range（小脸）</option>
+            <option value="short">Short Range（原版）</option>
+          </select>
+          <span class="mono" id="faceModelNote" style="font-size:11px;color:var(--muted)">小脸优先 · 覆盖更远</span>
         </div>
 
         <div id="status">点击「开启摄像头」并授权。</div>
@@ -225,6 +235,17 @@
           <span>已采集</span><span id="bDur">0s / 30s</span>
           <span>原始 HR</span><span id="bRaw">—</span>
         </div>
+      </article>
+
+      <article class="metric stats">
+        <h2><span>人脸检测模型对比</span><span class="tag" id="modelNote">运行中可切换</span></h2>
+        <table>
+          <thead>
+            <tr><th>模型</th><th>检测次数</th><th>命中</th><th>命中率</th><th>中位耗时</th></tr>
+          </thead>
+          <tbody id="modelRows"></tbody>
+        </table>
+        <div class="note" id="modelHint" style="padding:8px 0 0">切换模型会清空当前人脸框并重新检测；命中率与耗时按模型分别累计。</div>
       </article>
 
       <article class="metric stats">
