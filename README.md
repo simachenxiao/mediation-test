@@ -92,8 +92,9 @@ A 的 `/physio/estimate` 同时返回呼吸率（RR）和 RR 置信度：
 `/camera` 还会画出 RR 曲线。呼吸率来自 A 的 forehead 原始绿色通道，
 A+ 和 B 当前没有单独的呼吸率结果。
 
-B 的人脸检测是 open_rppg **内部**的 BlazeFace ONNX（默认 `blaze_face.onnx`，128×128，每 5 帧检测一次），
-不是页面上可切换的 MediaPipe 模型。B 卡片里的「B 人脸」显示它自己的命中框大小；
+B 的人脸检测是 open_rppg **内部**的 BlazeFace ONNX（默认 `blaze_face_full.onnx`，192×192，每 5 帧检测一次），
+不是页面上可切换的 MediaPipe 模型。可用 `DEEP_FACE_MODE=Near` 切回 open_rppg 原来的
+`blaze_face.onnx`（128×128）。B 卡片里的「B 人脸」显示它自己的命中框大小；
 摄像头页会用紫色虚线画出 B 的框，方便和 A/A+ 的浏览器检测框对比。
 
 ### 确定性重放
@@ -141,6 +142,7 @@ PORT=3201 npm start                 # 换端口（默认 3200）
 HOST=127.0.0.1 npm start            # 只允许本机访问（默认 0.0.0.0）
 PHYSIO_PYTHON=python3.11 npm start  # 指定 Python 解释器
 APLUS_PYTHON=python3.11 npm start    # 指定 A+ 侧车解释器（可选）
+DEEP_FACE_MODE=Near npm start        # B 内部检测器切回 128px（默认 Far=192px）
 ```
 
 ---

@@ -11,7 +11,7 @@
 // 不会写入或修改 ../code 里的任何文件。
 //
 // 启动：node server.mjs    （或 npm start）
-// 环境变量：PORT（默认 3200）、HOST（默认 0.0.0.0）、PHYSIO_PYTHON、DEEP_PYTHON、APLUS_PYTHON
+// 环境变量：PORT（默认 3200）、HOST（默认 0.0.0.0）、PHYSIO_PYTHON、DEEP_PYTHON、APLUS_PYTHON、DEEP_FACE_MODE
 
 import http from 'node:http';
 import fs from 'node:fs';

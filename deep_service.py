@@ -35,6 +35,9 @@ if str(VENDOR) not in sys.path:
 import numpy as np  # noqa: E402
 
 MODEL_NAME = os.environ.get("DEEP_MODEL", "FacePhys.rlap")
+# Far -> open_rppg 的 blaze_face_full.onnx（192x192，适合小脸/远距离）
+# Near -> blaze_face.onnx（128x128，open_rppg 默认）
+FACE_MODE = os.environ.get("DEEP_FACE_MODE", "Far")
 
 
 class Stabilizer:
@@ -154,6 +157,8 @@ class DeepSession:
                 import rppg  # 延迟导入：让 HTTP 服务先起来
 
                 model = rppg.Model(MODEL_NAME)
+                mode = str(FACE_MODE or "Far").strip().lower()
+                model.face_mode = "Near" if mode in ("near", "short", "short_range") else "Far"
                 model.__enter__()
                 with self.lock:
                     self.model = model
@@ -314,6 +319,7 @@ class DeepSession:
                 "loading": self.loading,
                 "error": self.error,
                 "model": MODEL_NAME,
+                "faceMode": getattr(self.model, "face_mode", None) if self.model is not None else None,
                 "duration": round(float(self.model.now), 2) if self.model is not None else 0,
                 "loadSec": (
                     round((self.load_finished_at or time.time()) - self.load_started_at, 1)
