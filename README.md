@@ -87,6 +87,10 @@ A+ 是纯 NumPy/SciPy 侧车，不需要额外模型或新依赖；如果生命�
 
 A+ 现在只使用 POS：额头优先；只有额头没有可用候选时，才回退到脸颊。
 
+B 的人脸检测是 open_rppg **内部**的 BlazeFace ONNX（默认 `blaze_face.onnx`，128×128，每 5 帧检测一次），
+不是页面上可切换的 MediaPipe 模型。B 卡片里的「B 人脸」显示它自己的命中框大小；
+摄像头页会用紫色虚线画出 B 的框，方便和 A/A+ 的浏览器检测框对比。
+
 ### 确定性重放
 
 打开 `http://localhost:3200/replay`。
@@ -113,6 +117,7 @@ A+ 现在只使用 POS：额头优先；只有额头没有可用候选时，才�
 - 会话统计：均值 / 中位数 / 最小最大值 / 标准差，以及 A+/A、B/A、B/A+ 的平均绝对差；
 - 可叠加人脸框与额头/脸颊 ROI，并给出运动门控提示；
 - 可运行中切换人脸模型（Full Range / Short Range），并按模型累计命中率与中位耗时；
+- 叠加 B 自己的内部人脸框（紫色虚线），看 B 是否也检测到同一张脸；
 - 「导出 JSON」保存本次会话的逐点序列、统计与人脸模型统计。
 
 浏览器要求：页面必须运行在 `http://localhost` 或 `https`（`localhost` 属于安全上下文），
@@ -160,7 +165,7 @@ test/
     └── lib/
         ├── emotion.js          微表情模块（独立）
         ├── vitals.js           生命体征模块（独立）
-        ├── face-detect.js      MediaPipe BlazeFace Full Range 检测
+        ├── face-detect.js      MediaPipe BlazeFace（full/short 可切换）
         ├── roi.js              面部 ROI 像素采样
         ├── physio-live.js      实时 A 采样（30s 窗口，A+ 复用）
         ├── video-frames.js     抽帧 / seek / 重采样

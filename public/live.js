@@ -43,6 +43,7 @@ const els = {
   bHr: $('bHr'),
   bState: $('bState'),
   bSqi: $('bSqi'),
+  bFace: $('bFace'),
   bDur: $('bDur'),
   bRaw: $('bRaw'),
   diffAPlus: $('diffAPlus'),
@@ -576,12 +577,16 @@ function updateUI() {
     els.bHr.innerHTML = '—<small>bpm</small>';
     els.bState.textContent = 'B 不可用';
     els.bSqi.textContent = '—';
+    els.bFace.textContent = '—';
+    els.bFace.title = '';
     els.bDur.textContent = '—';
     els.bRaw.textContent = '—';
   } else if (state.deep.loading) {
     els.bHr.innerHTML = '—<small>bpm</small>';
     els.bState.textContent = '模型加载中…';
     els.bSqi.textContent = '—';
+    els.bFace.textContent = '—';
+    els.bFace.title = '';
     els.bDur.textContent = '—';
     els.bRaw.textContent = '—';
   } else if (b && b.ready) {
@@ -599,6 +604,15 @@ function updateUI() {
       els.bState.textContent = '预热';
     }
     els.bSqi.textContent = Number.isFinite(Number(b.sqi)) ? Number(b.sqi).toFixed(3) : '—';
+    const bf = b.face;
+    if (bf) {
+      const size = bf.box ? `${Math.round(bf.box.width)}×${Math.round(bf.box.height)}` : '无框';
+      els.bFace.textContent = bf.hasFace ? `命中 ${size}` : `未命中（${size}）`;
+      els.bFace.title = `${bf.detectorModel || 'BlazeFace'} · ${bf.inputSize || '?'}px · 每 ${bf.detectEvery || '?'} 帧检测`;
+    } else {
+      els.bFace.textContent = '—';
+      els.bFace.title = '';
+    }
     els.bDur.textContent = `${num(dur, 1)}s / 30s`;
     els.bRaw.textContent =
       dur >= 28 && Number.isFinite(Number(b.rawHr)) && Number(b.rawHr) > 0
@@ -608,6 +622,8 @@ function updateUI() {
     els.bHr.innerHTML = '—<small>bpm</small>';
     els.bState.textContent = '等待信号';
     els.bSqi.textContent = '—';
+    els.bFace.textContent = '—';
+    els.bFace.title = '';
     els.bDur.textContent = '0s / 30s';
     els.bRaw.textContent = '—';
   }

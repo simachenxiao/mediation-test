@@ -76,6 +76,7 @@ const els = {
   bHr: $('bHr'),
   bState: $('bState'),
   bSqi: $('bSqi'),
+  bFace: $('bFace'),
   bDur: $('bDur'),
   bRaw: $('bRaw'),
   statsBody: $('statsBody'),
@@ -661,7 +662,10 @@ function drawOverlay() {
   }
   overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   overlayCtx.clearRect(0, 0, cssW, cssH);
-  if (!els.showRoi.checked || !state.box) return;
+  if (!els.showRoi.checked) return;
+  const bFace = state.bResult?.face;
+  const bBox = bFace?.box;
+  if (!state.box && !bBox) return;
 
   // 摄像头画面 object-fit: cover，竖屏设备会左右裁切，需要按同一规则换算。
   const scale = Math.max(cssW / w, cssH / h);
@@ -672,23 +676,43 @@ function drawOverlay() {
   const mapX = (x) => cssW - (offsetX + x * scale);
   const mapY = (y) => offsetY + y * scale;
 
-  const b = state.box;
-  const moving = state.motion.level === 'high' || state.motion.level === 'moving';
-  const color = moving ? '#f59e0b' : '#22c55e';
-  overlayCtx.lineWidth = 2;
-  overlayCtx.strokeStyle = color;
-  overlayCtx.strokeRect(mapX(b.originX + b.width), mapY(b.originY), b.width * scale, b.height * scale);
+  if (state.box) {
+    const b = state.box;
+    const moving = state.motion.level === 'high' || state.motion.level === 'moving';
+    const color = moving ? '#f59e0b' : '#22c55e';
+    overlayCtx.lineWidth = 2;
+    overlayCtx.strokeStyle = color;
+    overlayCtx.strokeRect(mapX(b.originX + b.width), mapY(b.originY), b.width * scale, b.height * scale);
 
-  const rects = roiRects(b);
-  for (const [name, r] of Object.entries(rects)) {
-    overlayCtx.strokeStyle = ROI_COLORS[name] || '#94a3b8';
+    const rects = roiRects(b);
+    for (const [name, r] of Object.entries(rects)) {
+      overlayCtx.strokeStyle = ROI_COLORS[name] || '#94a3b8';
+      overlayCtx.lineWidth = 1.5;
+      const rx = mapX(r.x1);
+      const ry = mapY(r.y0);
+      overlayCtx.strokeRect(rx, ry, (r.x1 - r.x0) * scale, (r.y1 - r.y0) * scale);
+      overlayCtx.fillStyle = ROI_COLORS[name] || '#94a3b8';
+      overlayCtx.font = '11px ui-monospace, Consolas, monospace';
+      overlayCtx.fillText(ROI_ZH[name] || name, rx + 2, ry - 3);
+    }
+  }
+
+  // B 的框来自服务端 open_rppg 内部检测，坐标系是发给 B 的帧；
+  // 相机分辨率变化时需要按 frameWidth/frameHeight 缩放到当前 video 坐标。
+  if (bBox && bFace.frameWidth && bFace.frameHeight) {
+    const bx = (bBox.x / bFace.frameWidth) * w;
+    const by = (bBox.y / bFace.frameHeight) * h;
+    const bw = (bBox.width / bFace.frameWidth) * w;
+    const bh = (bBox.height / bFace.frameHeight) * h;
+    overlayCtx.save();
     overlayCtx.lineWidth = 1.5;
-    const rx = mapX(r.x1);
-    const ry = mapY(r.y0);
-    overlayCtx.strokeRect(rx, ry, (r.x1 - r.x0) * scale, (r.y1 - r.y0) * scale);
-    overlayCtx.fillStyle = ROI_COLORS[name] || '#94a3b8';
+    overlayCtx.strokeStyle = bFace.hasFace ? '#a78bfa' : '#64748b';
+    overlayCtx.setLineDash([5, 4]);
+    overlayCtx.strokeRect(mapX(bx + bw), mapY(by), bw * scale, bh * scale);
+    overlayCtx.fillStyle = bFace.hasFace ? '#a78bfa' : '#94a3b8';
     overlayCtx.font = '11px ui-monospace, Consolas, monospace';
-    overlayCtx.fillText(ROI_ZH[name] || name, rx + 2, ry - 3);
+    overlayCtx.fillText(bFace.hasFace ? 'B 人脸' : 'B 旧框', mapX(bx + bw) + 2, mapY(by) - 3);
+    overlayCtx.restore();
   }
 }
 
@@ -790,12 +814,16 @@ function updateUI() {
     showHr(els.bHr, null);
     els.bState.textContent = '未启用';
     els.bSqi.textContent = '—';
+    els.bFace.textContent = '—';
+    els.bFace.title = '';
     els.bDur.textContent = '0s / 30s';
     els.bRaw.textContent = '—';
   } else if (state.deep.error) {
     showHr(els.bHr, null);
     els.bState.textContent = 'B 不可用';
     els.bSqi.textContent = '—';
+    els.bFace.textContent = '—';
+    els.bFace.title = '';
     els.bDur.textContent = '—';
     els.bRaw.textContent = '—';
   } else if (b && b.ready) {
@@ -803,12 +831,23 @@ function updateUI() {
     showHr(els.bHr, dur >= 28 ? b.hr ?? b.rawHr : null);
     els.bState.textContent = dur < 28 ? `累计信号 ${dur.toFixed(1)}s` : b.status || '—';
     els.bSqi.textContent = Number.isFinite(Number(b.sqi)) ? Number(b.sqi).toFixed(3) : '—';
+    const bf = b.face;
+    if (bf) {
+      const size = bf.box ? `${Math.round(bf.box.width)}×${Math.round(bf.box.height)}` : '无框';
+      els.bFace.textContent = bf.hasFace ? `命中 ${size}` : `未命中（${size}）`;
+      els.bFace.title = `${bf.detectorModel || 'BlazeFace'} · ${bf.inputSize || '?'}px · 每 ${bf.detectEvery || '?'} 帧检测`;
+    } else {
+      els.bFace.textContent = '—';
+      els.bFace.title = '';
+    }
     els.bDur.textContent = `${dur.toFixed(1)}s / 30s`;
     els.bRaw.textContent = Number.isFinite(Number(b.rawHr)) ? `${num(b.rawHr, 1)} bpm` : '—';
   } else {
     showHr(els.bHr, null);
     els.bState.textContent = state.deep.loading ? '模型加载中…' : '等待模型';
     els.bSqi.textContent = '—';
+    els.bFace.textContent = '—';
+    els.bFace.title = '';
     els.bDur.textContent = '0s / 30s';
     els.bRaw.textContent = '—';
   }

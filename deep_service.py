@@ -79,6 +79,55 @@ class Stabilizer:
         return round(self.smoothed_hr, 1), "live"
 
 
+def _face_box(value: Any) -> dict[str, float] | None:
+    """把 open_rppg 的 [[y0,y1],[x0,x1]] 框转成像素 x/y/w/h。"""
+    try:
+        arr = np.asarray(value, dtype=np.float64)
+        if arr.shape != (2, 2) or not np.isfinite(arr).all():
+            return None
+        y0, y1 = float(arr[0, 0]), float(arr[0, 1])
+        x0, x1 = float(arr[1, 0]), float(arr[1, 1])
+        if x1 <= x0 or y1 <= y0:
+            return None
+        return {
+            "x": round(x0, 1),
+            "y": round(y0, 1),
+            "width": round(x1 - x0, 1),
+            "height": round(y1 - y0, 1),
+        }
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _face_info(model: Any) -> dict[str, Any]:
+    """B 内部人脸检测/裁剪的可见状态（不是浏览器的 MediaPipe 框）。"""
+    try:
+        detector = getattr(model, "detector", None)
+        frame = getattr(model, "frame", None)
+        frame_h, frame_w = (frame.shape[:2] if frame is not None else (None, None))
+        mode = str(getattr(model, "face_mode", "") or "")
+        statistic = getattr(model, "statistic", {}) or {}
+        return {
+            "hasFace": bool(getattr(model, "hasface", 0)),
+            "mode": mode,
+            "detectorModel": "blaze_face_full.onnx" if mode == "Far" else "blaze_face.onnx",
+            "inputSize": int(getattr(detector, "input_size", 0) or 0),
+            "detectEvery": int(getattr(model, "face_detect_per_n", 0) or 0),
+            "box": _face_box(getattr(model, "box", None)),
+            "rawBox": _face_box(getattr(model, "rbox", None)),
+            "frameWidth": int(frame_w) if frame_w else None,
+            "frameHeight": int(frame_h) if frame_h else None,
+            "frames": int(getattr(model, "n_frame", 0) or 0),
+            "statistic": {
+                str(k): int(v)
+                for k, v in dict(statistic).items()
+                if isinstance(v, (int, float)) and np.isfinite(float(v))
+            },
+        }
+    except Exception:
+        return {}
+
+
 class DeepSession:
     def __init__(self) -> None:
         self.lock = threading.RLock()
@@ -214,6 +263,7 @@ class DeepSession:
                 "status": "loading" if loading else "warming",
                 "duration": 0,
                 "latency": 0,
+                "face": None,
             }
 
         raw_hr: float | None = None
@@ -230,6 +280,7 @@ class DeepSession:
         except Exception as exc:  # noqa: BLE001
             err = f"{type(exc).__name__}: {exc}"
 
+        face = _face_info(model)
         hr, status = self.stabilizer.update(raw_hr, sqi, now=now)
         return {
             "ready": True,
@@ -241,6 +292,7 @@ class DeepSession:
             "status": status,
             "duration": round(duration, 2),
             "latency": round(latency, 3),
+            "face": face,
         }
 
     def stop(self) -> dict[str, Any]:
