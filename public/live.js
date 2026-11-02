@@ -39,6 +39,8 @@ const els = {
   aplusState: $('aplusState'),
   aplusQuality: $('aplusQuality'),
   aplusSqi: $('aplusSqi'),
+  aplusRR: $('aplusRR'),
+  aplusRRConf: $('aplusRRConf'),
   aplusMethod: $('aplusMethod'),
   aplusRaw: $('aplusRaw'),
   aplusSpan: $('aplusSpan'),
@@ -530,6 +532,8 @@ function updateUI() {
     els.aplusState.textContent = 'A+ 不可用';
     els.aplusQuality.textContent = '—';
     els.aplusSqi.textContent = '—';
+    els.aplusRR.textContent = '—';
+    els.aplusRRConf.textContent = '—';
     els.aplusMethod.textContent = '—';
     els.aplusRaw.textContent = '—';
   } else if (ap && ap.ready) {
@@ -569,6 +573,10 @@ function updateUI() {
     }
     els.aplusQuality.textContent = pct(quality);
     els.aplusSqi.textContent = Number.isFinite(sqi) ? sqi.toFixed(3) : '—';
+    const arr = Number(ap.respiratory_rate);
+    const arrConf = Number(ap.respiratory_confidence);
+    els.aplusRR.textContent = Number.isFinite(arr) && arr > 0 ? `${num(arr, 1)} /min` : '—';
+    els.aplusRRConf.textContent = Number.isFinite(arrConf) ? pct(arrConf) : '—';
     els.aplusMethod.textContent = ap.method || '—';
     els.aplusMethod.title = ap.method || '';
     els.aplusRaw.textContent = Number.isFinite(raw) && raw > 0 ? `${num(raw, 1)} bpm` : '—';
@@ -577,6 +585,8 @@ function updateUI() {
     els.aplusState.textContent = state.a.span() > 0 ? `预热中（${state.a.span().toFixed(1)}s）` : '等待人脸';
     els.aplusQuality.textContent = '—';
     els.aplusSqi.textContent = '—';
+    els.aplusRR.textContent = '—';
+    els.aplusRRConf.textContent = '—';
     els.aplusMethod.textContent = '—';
     els.aplusRaw.textContent = '—';
   }

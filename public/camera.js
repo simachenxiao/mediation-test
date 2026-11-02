@@ -72,6 +72,8 @@ const els = {
   aplusState: $('aplusState'),
   aplusQuality: $('aplusQuality'),
   aplusSqi: $('aplusSqi'),
+  aplusRR: $('aplusRR'),
+  aplusRRConf: $('aplusRRConf'),
   aplusRoi: $('aplusRoi'),
   aplusRaw: $('aplusRaw'),
   aplusSpan: $('aplusSpan'),
@@ -790,6 +792,8 @@ function updateUI() {
     els.aplusState.textContent = 'A+ 不可用';
     els.aplusQuality.textContent = '—';
     els.aplusSqi.textContent = '—';
+    els.aplusRR.textContent = '—';
+    els.aplusRRConf.textContent = '—';
     els.aplusRoi.textContent = '—';
     els.aplusRaw.textContent = '—';
   } else if (ap && ap.ready) {
@@ -816,6 +820,10 @@ function updateUI() {
     }
     els.aplusQuality.textContent = pct(quality);
     els.aplusSqi.textContent = Number.isFinite(Number(ap.sqi)) ? Number(ap.sqi).toFixed(3) : '—';
+    const arr = Number(ap.respiratory_rate);
+    const arrConf = Number(ap.respiratory_confidence);
+    els.aplusRR.textContent = Number.isFinite(arr) && arr > 0 ? `${num(arr, 1)} /min` : '—';
+    els.aplusRRConf.textContent = Number.isFinite(arrConf) ? pct(arrConf) : '—';
     els.aplusRoi.textContent = ap.activeRoi ? `${ap.activeRoi}${ap.fallback ? '（回退）' : ''}` : '—';
     els.aplusRaw.textContent = Number.isFinite(raw) && raw > 0 ? `${num(raw, 1)} bpm` : '—';
   } else {

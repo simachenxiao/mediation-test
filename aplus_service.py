@@ -9,7 +9,8 @@ A+ 不是 B 的替代品，而是在 A（POS + 单次 FFT）基础上补上 B �
   4. Welch 多段平均，替代单次 FFT 取最大峰；
   5. 峰值置信度 + 自相关 SQI + 第一名/第二名差距；
   6. 低质量窗口也维护“稳定候选”，但 reliable 仍然只由质量门控决定；
-  7. 返回 rawHr / hr / quality / reliable，页面同时显示原始候选和稳定候选。
+  7. 返回 rawHr / hr / respiratory_rate / respiratory_confidence / quality /
+     reliable，页面同时显示原始候选、稳定候选和呼吸率。
 
 输入与 /physio/estimate 完全一致：
 {
@@ -44,6 +45,9 @@ EPS = 1e-12
 RELIABLE_MIN_CONF = 0.01
 MIN_RELATIVE_RGB_VARIATION = 5e-5
 MIN_FALLBACK_SCORE = 0.05
+# 与 A 的 respiratory.py 使用同一呼吸频段；A+ 直接复用 POS 的绿色通道。
+RESP_BAND_HZ = (0.1, 0.5)
+RESP_ORDER = 4
 
 
 # --------------------------------------------------------------------------- //
@@ -265,6 +269,74 @@ def _sqi(x: np.ndarray, fs: float) -> float:
     if min_lag >= max_lag:
         return 0.0
     return float(np.clip(np.max(ac[min_lag : max_lag + 1]), 0.0, 1.0))
+
+
+def _interp_peak(psd: np.ndarray, idx: int) -> tuple[float, float]:
+    if idx <= 0 or idx >= len(psd) - 1:
+        return float(idx), float(psd[idx])
+    a, b, c = float(psd[idx - 1]), float(psd[idx]), float(psd[idx + 1])
+    denom = a - 2.0 * b + c
+    if abs(denom) < 1e-12:
+        return float(idx), b
+    delta = max(-1.0, min(1.0, 0.5 * (a - c) / denom))
+    return float(idx + delta), b - 0.25 * (a - c) * delta
+
+
+def _respiratory_rate(rgb: np.ndarray, fs: float) -> tuple[float, float]:
+    """从 A+ 当前 ROI 的原始绿色通道估计呼吸率。
+
+    与 A 的 respiratory.py 同源：绿色通道基线 + 脉搏幅度包络；
+    呼吸带 0.1–0.5Hz，Hann + FFT，置信度为峰附近功率占带内总功率。
+    返回 (breaths/min, confidence)。无法估计时返回 (0.0, 0.0)。
+    """
+    rgb = np.asarray(rgb, dtype=np.float64)
+    if rgb.ndim != 2 or rgb.shape[1] != 3 or rgb.shape[0] < 12 or fs <= 0:
+        return 0.0, 0.0
+    raw = rgb[:, 1]
+    if not np.isfinite(raw).all():
+        return 0.0, 0.0
+    raw_mean = float(np.mean(np.abs(raw)))
+    raw_variation = float(np.std(raw) / max(raw_mean, EPS))
+    if not np.isfinite(raw_variation) or raw_variation < MIN_RELATIVE_RGB_VARIATION:
+        return 0.0, 0.0
+
+    try:
+        base = sps.detrend(raw)
+        resp_wander = _bandpass(base, fs, RESP_BAND_HZ[0], RESP_BAND_HZ[1], order=RESP_ORDER)
+        pulse = _bandpass(base, fs, 0.7, 4.0, order=RESP_ORDER)
+        env = np.abs(pulse)
+        resp_env = _bandpass(sps.detrend(env), fs, RESP_BAND_HZ[0], RESP_BAND_HZ[1], order=RESP_ORDER)
+    except Exception:
+        return 0.0, 0.0
+
+    r1 = resp_wander / (float(np.std(resp_wander)) + EPS)
+    r2 = resp_env / (float(np.std(resp_env)) + EPS)
+    combo = r1 + 0.7 * r2
+    if float(np.std(combo)) < EPS:
+        return 0.0, 0.0
+
+    n = int(combo.size)
+    nfft = max(1 << int(np.ceil(np.log2(max(n * 4, 1)))), 1024)
+    win = np.hanning(n)
+    spec = np.abs(np.fft.rfft(combo * win, n=nfft)) ** 2
+    freqs = np.fft.rfftfreq(nfft, 1.0 / fs)
+
+    lo = max(0, int(np.searchsorted(freqs, RESP_BAND_HZ[0])))
+    hi = min(len(freqs), int(np.searchsorted(freqs, RESP_BAND_HZ[1])) + 1)
+    if hi - lo < 2:
+        return 0.0, 0.0
+    band = spec[lo:hi]
+    k = int(np.argmax(band)) + lo
+    f_bin, _ = _interp_peak(spec, k)
+    nb = max(0, k - 2)
+    ne = min(len(spec), k + 3)
+    peak_power = float(np.sum(spec[nb:ne]))
+    total = float(np.sum(band))
+    conf = float(np.clip(peak_power / max(total, EPS), 0.0, 1.0))
+    rr = float(f_bin * fs / nfft * 60.0)
+    if not (4.0 <= rr <= 40.0) or not np.isfinite(rr):
+        return 0.0, conf
+    return rr, conf
 
 
 def _weighted_median(items: list[tuple[float, float]]) -> float:
@@ -583,11 +655,16 @@ class AplusSession:
         def prepare(rgb: np.ndarray) -> np.ndarray:
             return _resample_rgb(rgb, t, fs)
 
+        forehead_rgb = prepare(forehead)
+        cheeks_rgb = prepare(cheeks)
+
         active_roi = "forehead"
-        candidates = _roi_candidates(prepare(forehead), fs, "forehead")
+        active_rgb = forehead_rgb
+        candidates = _roi_candidates(active_rgb, fs, "forehead")
         if not candidates or max(float(c["score"]) for c in candidates) < MIN_FALLBACK_SCORE:
             active_roi = "cheeks"
-            candidates = _roi_candidates(prepare(cheeks), fs, "cheeks")
+            active_rgb = cheeks_rgb
+            candidates = _roi_candidates(active_rgb, fs, "cheeks")
 
         if not candidates:
             return {"ready": False, "error": "额头和脸颊都没有得到有效心率", "nSamples": n}
@@ -619,6 +696,7 @@ class AplusSession:
             and near_sqi >= 0.22
             and near_margin >= 1.10
         )
+        respiratory_rate, respiratory_confidence = _respiratory_rate(active_rgb, fs)
 
         with self.lock:
             replay_time = None
@@ -639,6 +717,8 @@ class AplusSession:
                 "sqi": round(float(near_sqi), 3),
                 "margin": round(float(near_margin), 3),
                 "quality": round(float(quality), 3),
+                "respiratory_rate": round(float(respiratory_rate), 1),
+                "respiratory_confidence": round(float(respiratory_confidence), 3),
                 "reliable": reliable,
                 "status": status,
                 "heldSec": held_sec,

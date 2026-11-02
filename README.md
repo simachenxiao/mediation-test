@@ -86,6 +86,9 @@ A/A+/B 都使用 30 秒滑动窗口，视频播放期间会禁用进度条拖动
 A+ 是纯 NumPy/SciPy 侧车，不需要额外模型或新依赖；如果生命体征依赖已安装，A+ 就能启动。A+ 从约 12 秒开始，之后每约 1 秒更新一次；A 从约 8 秒开始，之后也每约 1 秒更新。
 
 A+ 现在只使用 POS：额头优先；只有额头没有可用候选时，才回退到脸颊。
+A+ 也会返回 `respiratory_rate` / `respiratory_confidence`：从当前主 ROI 的原始
+绿色通道估计，算法与 A 的 respiratory 同源（0.1–0.5Hz + 脉搏包络）；
+页面 A+ 卡片会显示「呼吸 RR / RR 置信度」。
 
 A 的 `/physio/estimate` 同时返回呼吸率（RR）和 RR 置信度：
 `/live` 和 `/camera` 的 A 卡片会显示「呼吸 RR / RR 置信度」，
@@ -95,7 +98,7 @@ B 的呼吸率来自 rppg-demo 的 `HrvRespirationEstimator`：先读 HRV 的
 `breathingrate`，没有就从 BVP 原始信号做 0.08–0.5Hz 带通 + Welch。
 `/live` 和 `/camera` 的 B 卡片会显示「B 呼吸 RR / RR 来源」，来源分为
 `HRV 派生`、`BVP 派生`、`保持`。B 的 RR 是实验性输出，不等于医学呼吸监测。
-A+ 当前没有独立 RR。
+A+ 的 RR 与 A 使用同一类绿色通道模型，但主 ROI 可能是 forehead 或回退后的 cheeks。
 
 B 的人脸检测是 open_rppg **内部**的 BlazeFace ONNX（默认 `blaze_face_full.onnx`，192×192，每 5 帧检测一次），
 不是页面上可切换的 MediaPipe 模型。可用 `DEEP_FACE_MODE=Near` 切回 open_rppg 原来的
@@ -144,7 +147,7 @@ B 的 RR 用 45s 窗口，优先 HRV 的 `breathingrate`，失败时从 `model.b
 - 用 `getUserMedia` 读本地摄像头，页面自动镜像（自拍视角）；
 - 会话时钟从点「开启摄像头」开始，与视频 currentTime 无关；
 - A/A+ 每秒出一次结果，B 每约 1 秒轮询 `/deep/result`；
-- A 卡片显示心率、置信度、呼吸 RR 和 RR 置信度；B 卡片显示 B 的呼吸 RR 与来源；
+- A 卡片显示心率、置信度、呼吸 RR 和 RR 置信度；A+ 卡片显示 A+ 的 RR 与 RR 置信度；B 卡片显示 B 的呼吸 RR 与来源；
 - 五张图：滚动 60s 心率、全程心率、滚动 60s 质量、原始候选 HR、A/B 呼吸率趋势；
 - 会话统计：均值 / 中位数 / 最小最大值 / 标准差，以及 A+/A、B/A、B/A+ 的平均绝对差；
 - 可叠加人脸框与额头/脸颊 ROI，并给出运动门控提示；
