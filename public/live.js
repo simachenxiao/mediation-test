@@ -45,6 +45,8 @@ const els = {
   bHr: $('bHr'),
   bState: $('bState'),
   bSqi: $('bSqi'),
+  bRR: $('bRR'),
+  bRRSrc: $('bRRSrc'),
   bFace: $('bFace'),
   bDur: $('bDur'),
   bRaw: $('bRaw'),
@@ -585,6 +587,8 @@ function updateUI() {
     els.bHr.innerHTML = '—<small>bpm</small>';
     els.bState.textContent = 'B 不可用';
     els.bSqi.textContent = '—';
+    els.bRR.textContent = '—';
+    els.bRRSrc.textContent = '—';
     els.bFace.textContent = '—';
     els.bFace.title = '';
     els.bDur.textContent = '—';
@@ -593,6 +597,8 @@ function updateUI() {
     els.bHr.innerHTML = '—<small>bpm</small>';
     els.bState.textContent = '模型加载中…';
     els.bSqi.textContent = '—';
+    els.bRR.textContent = '—';
+    els.bRRSrc.textContent = '—';
     els.bFace.textContent = '—';
     els.bFace.title = '';
     els.bDur.textContent = '—';
@@ -612,6 +618,10 @@ function updateUI() {
       els.bState.textContent = '预热';
     }
     els.bSqi.textContent = Number.isFinite(Number(b.sqi)) ? Number(b.sqi).toFixed(3) : '—';
+    const brr = Number(b.rr);
+    els.bRR.textContent = Number.isFinite(brr) && brr > 0 ? `${num(brr, 1)} /min` : '—';
+    els.bRRSrc.textContent =
+      b.rrSource === 'hrv' ? 'HRV 派生' : b.rrSource === 'bvp' ? 'BVP 派生' : b.rrSource === 'cached' ? '保持' : '—';
     const bf = b.face;
     if (bf) {
       const size = bf.box ? `${Math.round(bf.box.width)}×${Math.round(bf.box.height)}` : '无框';
@@ -630,6 +640,8 @@ function updateUI() {
     els.bHr.innerHTML = '—<small>bpm</small>';
     els.bState.textContent = '等待信号';
     els.bSqi.textContent = '—';
+    els.bRR.textContent = '—';
+    els.bRRSrc.textContent = '—';
     els.bFace.textContent = '—';
     els.bFace.title = '';
     els.bDur.textContent = '0s / 30s';

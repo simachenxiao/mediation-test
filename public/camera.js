@@ -78,6 +78,8 @@ const els = {
   bHr: $('bHr'),
   bState: $('bState'),
   bSqi: $('bSqi'),
+  bRR: $('bRR'),
+  bRRSrc: $('bRRSrc'),
   bFace: $('bFace'),
   bDur: $('bDur'),
   bRaw: $('bRaw'),
@@ -144,6 +146,7 @@ const state = {
   aplusSeries: [],
   bSeries: [],
   aRR: [],
+  bRR: [],
   aQ: [],
   aplusQ: [],
   bQ: [],
@@ -351,6 +354,7 @@ async function resetDeep() {
     });
     state.bResult = null;
     state.bSeries = [];
+    state.bRR = [];
     state.bQ = [];
     state.bRaw = [];
     log('B 模型已重置。');
@@ -646,6 +650,8 @@ function updateBResult(r) {
     pushSeries(state.bQ, t, Number.isFinite(Number(r.sqi)) ? Number(r.sqi) : 0);
     pushSeries(state.bRaw, t, hr);
   }
+  const rr = Number(r.rr);
+  if (r.ready && Number.isFinite(rr) && rr > 0 && rr < 80) pushSeries(state.bRR, t, rr);
   if (r.error && Date.now() - state.lastBErrorAt > 5000) {
     state.lastBErrorAt = Date.now();
     log(`B 结果错误：${r.error}`);
@@ -827,6 +833,8 @@ function updateUI() {
     showHr(els.bHr, null);
     els.bState.textContent = '未启用';
     els.bSqi.textContent = '—';
+    els.bRR.textContent = '—';
+    els.bRRSrc.textContent = '—';
     els.bFace.textContent = '—';
     els.bFace.title = '';
     els.bDur.textContent = '0s / 30s';
@@ -835,6 +843,8 @@ function updateUI() {
     showHr(els.bHr, null);
     els.bState.textContent = 'B 不可用';
     els.bSqi.textContent = '—';
+    els.bRR.textContent = '—';
+    els.bRRSrc.textContent = '—';
     els.bFace.textContent = '—';
     els.bFace.title = '';
     els.bDur.textContent = '—';
@@ -844,6 +854,10 @@ function updateUI() {
     showHr(els.bHr, dur >= 28 ? b.hr ?? b.rawHr : null);
     els.bState.textContent = dur < 28 ? `累计信号 ${dur.toFixed(1)}s` : b.status || '—';
     els.bSqi.textContent = Number.isFinite(Number(b.sqi)) ? Number(b.sqi).toFixed(3) : '—';
+    const brr = Number(b.rr);
+    els.bRR.textContent = Number.isFinite(brr) && brr > 0 ? `${num(brr, 1)} /min` : '—';
+    els.bRRSrc.textContent =
+      b.rrSource === 'hrv' ? 'HRV 派生' : b.rrSource === 'bvp' ? 'BVP 派生' : b.rrSource === 'cached' ? '保持' : '—';
     const bf = b.face;
     if (bf) {
       const size = bf.box ? `${Math.round(bf.box.width)}×${Math.round(bf.box.height)}` : '无框';
@@ -859,6 +873,8 @@ function updateUI() {
     showHr(els.bHr, null);
     els.bState.textContent = state.deep.loading ? '模型加载中…' : '等待模型';
     els.bSqi.textContent = '—';
+    els.bRR.textContent = '—';
+    els.bRRSrc.textContent = '—';
     els.bFace.textContent = '—';
     els.bFace.title = '';
     els.bDur.textContent = '0s / 30s';
@@ -1013,6 +1029,7 @@ function drawCharts() {
   drawLineChart(els.rrChart, {
     series: [
       { label: 'A 呼吸率', color: '#f59e0b', width: 2, points: state.aRR },
+      { label: 'B 呼吸率', color: '#a78bfa', width: 2, points: state.bRR },
     ],
     xRange: [0, end],
     yRange: [5, 60],
@@ -1122,6 +1139,7 @@ async function startAnalysis() {
   state.aplusRaw = [];
   state.bRaw = [];
   state.aRR = [];
+  state.bRR = [];
   state.box = null;
   state.boxAt = -Infinity;
   state.lastDetectAt = -Infinity;
@@ -1172,6 +1190,7 @@ function clearHistory() {
   state.aplusSeries = [];
   state.bSeries = [];
   state.aRR = [];
+  state.bRR = [];
   state.aQ = [];
   state.aplusQ = [];
   state.bQ = [];
@@ -1205,6 +1224,7 @@ function exportJson() {
       aplusRaw: state.aplusRaw,
       bRaw: state.bRaw,
       aRespiratory: state.aRR,
+      bRespiratory: state.bRR,
       faceModels: state.modelStats,
     },
     stats: {

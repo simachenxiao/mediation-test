@@ -31,13 +31,19 @@ VENDOR = DEMO / "vendor" / "open_rppg"
 
 if str(VENDOR) not in sys.path:
     sys.path.insert(0, str(VENDOR))
+# 复用 rppg-demo 的呼吸/HRV 估计器；只读导入，不修改该目录。
+if str(DEMO) not in sys.path:
+    sys.path.insert(0, str(DEMO))
 
 import numpy as np  # noqa: E402
+from vital_signs.hrv_respiration import HrvRespirationEstimator  # noqa: E402
 
 MODEL_NAME = os.environ.get("DEEP_MODEL", "FacePhys.rlap")
 # Far -> open_rppg 的 blaze_face_full.onnx（192x192，适合小脸/远距离）
 # Near -> blaze_face.onnx（128x128，open_rppg 默认）
 FACE_MODE = os.environ.get("DEEP_FACE_MODE", "Far")
+# rppg-demo 的默认 hrvWindow=45s；呼吸需要比 HR 更长的窗口。
+RR_WINDOW_SEC = float(os.environ.get("DEEP_RR_WINDOW", "45"))
 
 
 class Stabilizer:
@@ -142,6 +148,7 @@ class DeepSession:
         self.load_finished_at: float | None = None
         self.initial_state: Any | None = None
         self.stabilizer = Stabilizer()
+        self.hrv_respiration = HrvRespirationEstimator()
 
     def start(self) -> dict[str, Any]:
         with self.lock:
@@ -160,6 +167,7 @@ class DeepSession:
                 mode = str(FACE_MODE or "Far").strip().lower()
                 model.face_mode = "Near" if mode in ("near", "short", "short_range") else "Far"
                 model.__enter__()
+                self.hrv_respiration.reset()
                 with self.lock:
                     self.model = model
                     self.initial_state = copy.deepcopy(model.state)
@@ -204,6 +212,7 @@ class DeepSession:
             if self.initial_state is not None:
                 model.state = copy.deepcopy(self.initial_state)
             self.stabilizer.reset()
+            self.hrv_respiration.reset()
             self.model = model
             self.ready = True
         return {**self.status(), "ok": True}
@@ -269,6 +278,8 @@ class DeepSession:
                 "duration": 0,
                 "latency": 0,
                 "face": None,
+                "rr": None,
+                "rrSource": None,
             }
 
         raw_hr: float | None = None
@@ -286,6 +297,12 @@ class DeepSession:
             err = f"{type(exc).__name__}: {exc}"
 
         face = _face_info(model)
+        rr: float | None = None
+        rr_source: str | None = None
+        try:
+            _hrv, rr, rr_source = self.hrv_respiration.collect(model, RR_WINDOW_SEC)
+        except Exception as exc:  # noqa: BLE001
+            err = err or f"呼吸估计失败: {type(exc).__name__}: {exc}"
         hr, status = self.stabilizer.update(raw_hr, sqi, now=now)
         return {
             "ready": True,
@@ -298,6 +315,8 @@ class DeepSession:
             "duration": round(duration, 2),
             "latency": round(latency, 3),
             "face": face,
+            "rr": rr,
+            "rrSource": rr_source,
         }
 
     def stop(self) -> dict[str, Any]:

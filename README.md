@@ -89,13 +89,38 @@ A+ 现在只使用 POS：额头优先；只有额头没有可用候选时，才�
 
 A 的 `/physio/estimate` 同时返回呼吸率（RR）和 RR 置信度：
 `/live` 和 `/camera` 的 A 卡片会显示「呼吸 RR / RR 置信度」，
-`/camera` 还会画出 RR 曲线。呼吸率来自 A 的 forehead 原始绿色通道，
-A+ 和 B 当前没有单独的呼吸率结果。
+`/camera` 还会画出 RR 曲线。呼吸率来自 A 的 forehead 原始绿色通道。
+
+B 的呼吸率来自 rppg-demo 的 `HrvRespirationEstimator`：先读 HRV 的
+`breathingrate`，没有就从 BVP 原始信号做 0.08–0.5Hz 带通 + Welch。
+`/live` 和 `/camera` 的 B 卡片会显示「B 呼吸 RR / RR 来源」，来源分为
+`HRV 派生`、`BVP 派生`、`保持`。B 的 RR 是实验性输出，不等于医学呼吸监测。
+A+ 当前没有独立 RR。
 
 B 的人脸检测是 open_rppg **内部**的 BlazeFace ONNX（默认 `blaze_face_full.onnx`，192×192，每 5 帧检测一次），
 不是页面上可切换的 MediaPipe 模型。可用 `DEEP_FACE_MODE=Near` 切回 open_rppg 原来的
 `blaze_face.onnx`（128×128）。B 卡片里的「B 人脸」显示它自己的命中框大小；
 摄像头页会用紫色虚线画出 B 的框，方便和 A/A+ 的浏览器检测框对比。
+
+### B 的心率/呼吸实现与 rppg-demo 的关系
+
+B 与 `../EmotiEffLib-main/rppg-demo` 的 HR 核心逻辑一致：
+
+- 都用 `Model.hr(start=-30, return_hrv=False)` 取 `hr` 和 `SQI`；
+- 都用同一套 `HeartRateStabilizer`（35–190bpm 范围、SQI<0.2 预热、
+  SQI<0.18 保持、5bpm/s 限速、`alpha=0.12+0.18*quality`）；
+- B 只是额外把 `now` 传进去，用于 `/replay` 的确定性重放。
+
+不同的地方：
+
+- rppg-demo 还计算 HRV、BP、SpO2 和 BVP 波形，B 只暴露 HR/RR/人脸；
+- rppg-demo 的 HR 窗口可通过 `hrWindow` 配，B 固定 30s；
+- B 的 `face_mode` 现在是 `Far`（192px），rppg-demo 默认是 `Near`（128px）；
+- B 通过只读导入复用 rppg-demo 的 `HrvRespirationEstimator` 来产出 RR，
+  不修改 `rppg-demo` 目录。
+
+B 的 RR 用 45s 窗口，优先 HRV 的 `breathingrate`，失败时从 `model.bvp(raw=True)`
+做 0.08–0.5Hz 带通 + Welch；因此 B 的 RR 与 A 的额头绿色通道 RR 不是同一条信号。
 
 ### 确定性重放
 
@@ -119,13 +144,13 @@ B 的人脸检测是 open_rppg **内部**的 BlazeFace ONNX（默认 `blaze_face
 - 用 `getUserMedia` 读本地摄像头，页面自动镜像（自拍视角）；
 - 会话时钟从点「开启摄像头」开始，与视频 currentTime 无关；
 - A/A+ 每秒出一次结果，B 每约 1 秒轮询 `/deep/result`；
-- A 卡片显示心率、置信度、呼吸 RR 和 RR 置信度；
-- 五张图：滚动 60s 心率、全程心率、滚动 60s 质量、原始候选 HR、呼吸率趋势；
+- A 卡片显示心率、置信度、呼吸 RR 和 RR 置信度；B 卡片显示 B 的呼吸 RR 与来源；
+- 五张图：滚动 60s 心率、全程心率、滚动 60s 质量、原始候选 HR、A/B 呼吸率趋势；
 - 会话统计：均值 / 中位数 / 最小最大值 / 标准差，以及 A+/A、B/A、B/A+ 的平均绝对差；
 - 可叠加人脸框与额头/脸颊 ROI，并给出运动门控提示；
 - 可运行中切换人脸模型（Full Range / Short Range），并按模型累计命中率与中位耗时；
 - 叠加 B 自己的内部人脸框（紫色虚线），看 B 是否也检测到同一张脸；
-- 显示 A 的呼吸率（RR）与 RR 趋势；
+- 显示 A 的呼吸率（RR）与 RR 趋势；B 卡片也显示 B 的 RR（实验性）；
 - 「导出 JSON」保存本次会话的逐点序列、统计与人脸模型统计。
 
 浏览器要求：页面必须运行在 `http://localhost` 或 `https`（`localhost` 属于安全上下文），
@@ -143,6 +168,7 @@ HOST=127.0.0.1 npm start            # 只允许本机访问（默认 0.0.0.0）
 PHYSIO_PYTHON=python3.11 npm start  # 指定 Python 解释器
 APLUS_PYTHON=python3.11 npm start    # 指定 A+ 侧车解释器（可选）
 DEEP_FACE_MODE=Near npm start        # B 内部检测器切回 128px（默认 Far=192px）
+DEEP_RR_WINDOW=45 npm start          # B 呼吸率窗口（默认 45s）
 ```
 
 ---
