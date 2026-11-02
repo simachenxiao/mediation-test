@@ -64,6 +64,8 @@ const els = {
   aHr: $('aHr'),
   aState: $('aState'),
   aConf: $('aConf'),
+  aRR: $('aRR'),
+  aRRConf: $('aRRConf'),
   aSpan: $('aSpan'),
   aFrames: $('aFrames'),
   aplusHr: $('aplusHr'),
@@ -86,6 +88,8 @@ const els = {
   allChart: $('allChart'),
   rollQChart: $('rollQChart'),
   rawChart: $('rawChart'),
+  rrChart: $('rrChart'),
+  rrRange: $('rrRange'),
   rollRange: $('rollRange'),
   allRange: $('allRange'),
   rawRange: $('rawRange'),
@@ -139,6 +143,7 @@ const state = {
   aSeries: [],
   aplusSeries: [],
   bSeries: [],
+  aRR: [],
   aQ: [],
   aplusQ: [],
   bQ: [],
@@ -601,6 +606,8 @@ function updateAResult(r, t) {
     pushSeries(state.aSeries, t, hr);
     pushSeries(state.aQ, t, Number.isFinite(conf) ? Math.max(0, Math.min(1, conf)) : 0);
   }
+  const rr = Number(r.respiratory_rate);
+  if (Number.isFinite(rr) && rr > 0 && rr < 80) pushSeries(state.aRR, t, rr);
 }
 
 function updateAplusResult(r, t) {
@@ -757,10 +764,16 @@ function updateUI() {
     els.aState.textContent =
       Number.isFinite(aConf) && aConf >= 0.2 ? '实时' : `低质量（置信度 ${pct(aConf)}）`;
     els.aConf.textContent = pct(aConf);
+    const rr = Number(a.respiratory_rate);
+    const rrConf = Number(a.respiratory_confidence);
+    els.aRR.textContent = Number.isFinite(rr) && rr > 0 ? `${num(rr, 1)} /min` : '—';
+    els.aRRConf.textContent = Number.isFinite(rrConf) ? pct(rrConf) : '—';
   } else {
     showHr(els.aHr, null);
     els.aState.textContent = state.a.span() > 0 ? `预热中（${state.a.span().toFixed(1)}s）` : '等待人脸';
     els.aConf.textContent = '—';
+    els.aRR.textContent = '—';
+    els.aRRConf.textContent = '—';
   }
   els.aSpan.textContent = `${Math.min(30, state.a.span()).toFixed(1)}s`;
   els.aFrames.textContent = `${state.frames}`;
@@ -996,6 +1009,18 @@ function drawCharts() {
     yFormat: (v) => `${Math.round(v)}`,
   });
   els.rawRange.textContent = end > ROLL_SEC ? `最近 ${ROLL_SEC}s` : `0–${ROLL_SEC}s`;
+
+  drawLineChart(els.rrChart, {
+    series: [
+      { label: 'A 呼吸率', color: '#f59e0b', width: 2, points: state.aRR },
+    ],
+    xRange: [0, end],
+    yRange: [5, 60],
+    yLabel: '/min',
+    xFormat: (v) => `${Math.round(v)}s`,
+    yFormat: (v) => `${Math.round(v)}`,
+  });
+  els.rrRange.textContent = `0–${Math.round(end)}s`;
 }
 
 // --------------------------------------------------------------------------- //
@@ -1087,6 +1112,16 @@ async function startAnalysis() {
     full: { tries: 0, hits: 0, totalMs: 0, latencies: [] },
     short: { tries: 0, hits: 0, totalMs: 0, latencies: [] },
   };
+  state.aSeries = [];
+  state.aplusSeries = [];
+  state.bSeries = [];
+  state.aQ = [];
+  state.aplusQ = [];
+  state.bQ = [];
+  state.aRaw = [];
+  state.aplusRaw = [];
+  state.bRaw = [];
+  state.aRR = [];
   state.box = null;
   state.boxAt = -Infinity;
   state.lastDetectAt = -Infinity;
@@ -1136,6 +1171,7 @@ function clearHistory() {
   state.aSeries = [];
   state.aplusSeries = [];
   state.bSeries = [];
+  state.aRR = [];
   state.aQ = [];
   state.aplusQ = [];
   state.bQ = [];
@@ -1168,6 +1204,7 @@ function exportJson() {
       bSqi: state.bQ,
       aplusRaw: state.aplusRaw,
       bRaw: state.bRaw,
+      aRespiratory: state.aRR,
       faceModels: state.modelStats,
     },
     stats: {

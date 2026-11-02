@@ -208,6 +208,8 @@
         <div class="state" id="aState">等待</div>
         <div class="rows">
           <span>置信度</span><span id="aConf">—</span>
+          <span>呼吸 RR</span><span id="aRR">—</span>
+          <span>RR 置信度</span><span id="aRRConf">—</span>
           <span>有效窗口</span><span id="aSpan">0s</span>
           <span>采样</span><span id="aFrames">0</span>
         </div>
@@ -283,6 +285,10 @@
       <div class="chart-box">
         <h3>原始候选 HR（未稳定） <span id="rawRange">最近 60s</span></h3>
         <canvas id="rawChart" class="chart"></canvas>
+      </div>
+      <div class="chart-box" style="grid-column:1/-1">
+        <h3>呼吸率（A · 实时） <span id="rrRange">0–60s</span></h3>
+        <canvas id="rrChart" class="chart"></canvas>
       </div>
     </section>
 

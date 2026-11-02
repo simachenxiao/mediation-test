@@ -32,6 +32,8 @@ const els = {
   aHr: $('aHr'),
   aState: $('aState'),
   aConf: $('aConf'),
+  aRR: $('aRR'),
+  aRRConf: $('aRRConf'),
   aSpan: $('aSpan'),
   aplusHr: $('aplusHr'),
   aplusState: $('aplusState'),
@@ -507,10 +509,16 @@ function updateUI() {
         ? '实时'
         : `低质量（置信度 ${pct(aConf)}）`;
     els.aConf.textContent = pct(aConf);
+    const rr = Number(a.respiratory_rate);
+    const rrConf = Number(a.respiratory_confidence);
+    els.aRR.textContent = Number.isFinite(rr) && rr > 0 ? `${num(rr, 1)} /min` : '—';
+    els.aRRConf.textContent = Number.isFinite(rrConf) ? pct(rrConf) : '—';
   } else {
     els.aHr.innerHTML = '—<small>bpm</small>';
     els.aState.textContent = state.a.span() > 0 ? `预热中（${state.a.span().toFixed(1)}s）` : '等待人脸';
     els.aConf.textContent = '—';
+    els.aRR.textContent = '—';
+    els.aRRConf.textContent = '—';
   }
   els.aSpan.textContent = `${Math.min(30, state.a.span()).toFixed(1)}s`;
 
