@@ -1,0 +1,11 @@
+-r physio_service/requirements.txt
+
+# B 引擎（FacePhys.rlap）额外依赖
+jax
+keras>=3
+onnxruntime
+opencv-python
+heartpy
+einops
+h5py
+setuptools

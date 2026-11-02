@@ -30,6 +30,19 @@ npm start
 
 无需在 `test` 目录执行 `npm install`（Server 只用 Node 内置模块）。
 
+Linux 上建议：
+
+```bash
+cd test
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+bash start.sh
+```
+
+`start.sh` 会自动使用 `.venv` 里的 Python，并设置 A/A+/B 三个侧车的解释器。
+Windows 继续用 `start.bat` 或 `npm start`。
+
 前置条件：
 
 1. 本目录已经内置：
@@ -43,7 +56,7 @@ npm start
 2. 生命体征需要 Python 依赖：
 
 ```bash
-pip install -r physio_service/requirements.txt
+pip install -r requirements.txt
 ```
 
 微表情不依赖 Python；Python 没装时生命体征会提示侧车未启动，其余功能正常。
@@ -186,6 +199,8 @@ test/
 ├── server.mjs                  独立 HTTP 服务（Node 内置模块，无 npm 依赖）
 ├── deep_service.py             B 引擎侧车：Open-rppg FacePhys.rlap
 ├── aplus_service.py            A+ 侧车：POS + Welch + SQI
+├── requirements.txt            Linux/Python 全部依赖
+├── start.sh                    Linux 启动脚本
 ├── package.json                npm start -> node server.mjs
 ├── README.md                   本文件
 ├── models/
@@ -275,7 +290,7 @@ curl http://localhost:3200/physio/health
 如果报缺少 `numpy` / `scipy`，执行：
 
 ```bash
-pip install -r physio_service/requirements.txt
+pip install -r requirements.txt
 ```
 
 ---
